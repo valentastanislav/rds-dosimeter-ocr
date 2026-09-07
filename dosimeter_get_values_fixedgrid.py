@@ -202,18 +202,9 @@ def parse_extra_args() -> tuple[
 def parse_roi_args(
     remaining: list[str],
 ) -> argparse.Namespace:
-    saved = sys.argv
-
-    try:
-        sys.argv = [
-            saved[0],
-            *remaining,
-        ]
-
-        return roi_app.parse_args()
-
-    finally:
-        sys.argv = saved
+    return roi_app.parse_args(
+        remaining
+    )
 
 
 # ======================================================================
@@ -1048,23 +1039,14 @@ def main() -> int:
         # Run normal ROI pipeline
         # ==========================================================
 
-        saved_argv = sys.argv
-
         try:
-            sys.argv = [
-                saved_argv[0],
-                *remaining,
-            ]
-
             result = (
-                roi_app.main()
+                roi_app.main(
+                    remaining
+                )
             )
 
         finally:
-            sys.argv = (
-                saved_argv
-            )
-
             core.PROFILES[
                 "rds200"
             ] = original_profile

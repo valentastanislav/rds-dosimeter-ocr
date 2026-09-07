@@ -1220,7 +1220,9 @@ def save_debug_screenshots_roi(
 # ======================================================================
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(
+    argv: Sequence[str] | None = None,
+) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Extract changing seven-segment values from a "
@@ -1425,7 +1427,7 @@ def parse_args() -> argparse.Namespace:
         ),
     )
 
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 # ======================================================================
@@ -1528,8 +1530,10 @@ def validate_args(
 # ======================================================================
 
 
-def main() -> int:
-    args = parse_args()
+def main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    args = parse_args(argv)
 
     try:
         validate_args(
