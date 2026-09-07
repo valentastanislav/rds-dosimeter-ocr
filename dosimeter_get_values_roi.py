@@ -1072,102 +1072,6 @@ def find_display_crop_roi(
 
 
 # ======================================================================
-# Safe temporal filter
-#
-# Same operation as the original implementation, but all-NaN columns
-# remain NaN without producing numpy RuntimeWarnings.
-# ======================================================================
-
-
-def temporal_filter_safe(
-    data: np.ndarray,
-    window: int,
-    method: str,
-) -> np.ndarray:
-    if window <= 1:
-        return data.copy()
-
-    radius = window // 2
-
-    filtered = np.full_like(
-        data,
-        np.nan,
-    )
-
-    for index in range(
-        data.shape[0]
-    ):
-        start = max(
-            0,
-            index - radius,
-        )
-
-        end = min(
-            data.shape[0],
-            index + radius + 1,
-        )
-
-        block = data[
-            start:end
-        ]
-
-        flat_block = block.reshape(
-            block.shape[0],
-            -1,
-        )
-
-        flat_output = np.full(
-            flat_block.shape[1],
-            np.nan,
-            dtype=float,
-        )
-
-        for column in range(
-            flat_block.shape[1]
-        ):
-            values = flat_block[
-                :,
-                column,
-            ]
-
-            finite = values[
-                np.isfinite(
-                    values
-                )
-            ]
-
-            if finite.size == 0:
-                continue
-
-            if method == "median":
-                flat_output[column] = float(
-                    np.median(
-                        finite
-                    )
-                )
-
-            elif method == "max":
-                flat_output[column] = float(
-                    np.max(
-                        finite
-                    )
-                )
-
-            else:
-                raise ValueError(
-                    f"Unknown temporal filter: {method}"
-                )
-
-        filtered[index] = (
-            flat_output.reshape(
-                data.shape[1:]
-            )
-        )
-
-    return filtered
-
-
-# ======================================================================
 # Debug output using the same ROI-aware finder
 # ======================================================================
 
@@ -1653,171 +1557,75 @@ def main(
                 file=sys.stderr,
             )
 
-        # Remove numpy all-NaN warnings while retaining identical
-        # temporal filtering semantics.
-        original_temporal_filter = (
-            core.temporal_filter
+        segment_masks = (
+            core.make_segment_masks(
+                profile
+            )
         )
 
-        core.temporal_filter = (
-            temporal_filter_safe
+        shift_mask_bank = (
+            core.make_y_shift_mask_bank(
+                profile
+            )
         )
 
-        try:
-            segment_masks = (
-                core.make_segment_masks(
-                    profile
-                )
+        samples: list[
+            core.Sample
+        ] = []
+
+        previous_box: (
+            Box | None
+        ) = None
+
+        previous_shift: (
+            int | None
+        ) = None
+
+        print(
+            f"Processing {args.video} "
+            f"with profile {profile.name} "
+            f"at {sample_fps:g} samples/s "
+            f"(contrast={args.contrast}, "
+            f"min_confidence={minimum_confidence:g})...",
+            file=sys.stderr,
+        )
+
+        for (
+            frame_index,
+            frame,
+        ) in enumerate(
+            core.iter_ffmpeg_frames(
+                args.video,
+                info,
+                sample_fps,
+                args.processing_width,
             )
-
-            shift_mask_bank = (
-                core.make_y_shift_mask_bank(
-                    profile
-                )
-            )
-
-            samples: list[
-                core.Sample
-            ] = []
-
-            previous_box: (
-                Box | None
-            ) = None
-
-            previous_shift: (
-                int | None
-            ) = None
-
-            print(
-                f"Processing {args.video} "
-                f"with profile {profile.name} "
-                f"at {sample_fps:g} samples/s "
-                f"(contrast={args.contrast}, "
-                f"min_confidence={minimum_confidence:g})...",
-                file=sys.stderr,
-            )
-
-            for (
-                frame_index,
+        ):
+            (
+                display,
+                new_box,
+            ) = find_display_crop_roi(
                 frame,
-            ) in enumerate(
-                core.iter_ffmpeg_frames(
-                    args.video,
-                    info,
-                    sample_fps,
-                    args.processing_width,
-                )
-            ):
-                (
-                    display,
-                    new_box,
-                ) = find_display_crop_roi(
-                    frame,
-                    profile,
-                    previous_box,
-                    roi,
+                profile,
+                previous_box,
+                roi,
+            )
+
+            # Update tracking only after a VALID display crop.
+            if display is not None:
+                previous_box = (
+                    new_box
                 )
 
-                # Update tracking only after a VALID display crop.
-                if display is not None:
-                    previous_box = (
-                        new_box
-                    )
-
-                if display is None:
-                    samples.append(
-                        core.Sample(
-                            frame_index
-                            / sample_fps,
-                            None,
-                            display_found=False,
-                            aux_darkness=None,
-                            decimal_scores=None,
-                            alignment_shift=(
-                                previous_shift
-                                or 0
-                            ),
-                        )
-                    )
-
-                    continue
-
-                if profile.adaptive_y_shift:
-                    effective_contrast = (
-                        args.contrast
-                        if profile.name
-                        == "rds200"
-                        else "none"
-                    )
-
-                    (
-                        measured_darkness,
-                        previous_shift,
-                    ) = core.extract_darkness_adaptive(
-                        display,
-                        profile,
-                        shift_mask_bank,
-                        previous_shift,
-                        effective_contrast,
-                    )
-
-                else:
-                    measured_darkness = (
-                        selected_darkness_extractor(
-                            display,
-                            profile,
-                            segment_masks,
-                        )
-                    )
-
-                    previous_shift = 0
-
-                auxiliary_darkness = None
-
-                if (
-                    profile.aux_segment_percentile
-                    is not None
-                ):
-                    active_masks = (
-                        shift_mask_bank.get(
-                            previous_shift
-                            or 0,
-                            segment_masks,
-                        )
-                    )
-
-                    auxiliary_darkness = (
-                        core.extract_darkness_from_patches(
-                            core.digit_patches(
-                                display,
-                                profile,
-                            ),
-                            active_masks,
-                            segment_percentile=(
-                                profile.aux_segment_percentile
-                            ),
-                        )
-                    )
-
+            if display is None:
                 samples.append(
                     core.Sample(
                         frame_index
                         / sample_fps,
-                        measured_darkness,
-                        display_found=True,
-                        aux_darkness=(
-                            auxiliary_darkness
-                        ),
-                        decimal_scores=(
-                            core.extract_decimal_scores(
-                                display,
-                                profile,
-                                y_shift=(
-                                    previous_shift
-                                    or 0
-                                ),
-                            )
-                        ),
+                        None,
+                        display_found=False,
+                        aux_darkness=None,
+                        decimal_scores=None,
                         alignment_shift=(
                             previous_shift
                             or 0
@@ -1825,306 +1633,386 @@ def main(
                     )
                 )
 
-            if not samples:
-                raise RuntimeError(
-                    "No frames were decoded from the video."
+                continue
+
+            if profile.adaptive_y_shift:
+                effective_contrast = (
+                    args.contrast
+                    if profile.name
+                    == "rds200"
+                    else "none"
                 )
 
-            decimal_places_override = (
-                None
-                if args.decimal_places
-                == "auto"
-                else int(
-                    args.decimal_places
-                )
-            )
-
-            decoded_filtered = (
-                selected_decode_samples(
-                    samples,
+                (
+                    measured_darkness,
+                    previous_shift,
+                ) = core.extract_darkness_adaptive(
+                    display,
                     profile,
-                    filter_window,
-                    decimal_places_override=(
-                        decimal_places_override
-                    ),
-                    minimum_confidence=(
-                        minimum_confidence
-                    ),
-                    decimal_switch_penalty=(
-                        args.decimal_switch_penalty
-                    ),
+                    shift_mask_bank,
+                    previous_shift,
+                    effective_contrast,
                 )
-            )
 
-            # --------------------------------------------------
-            # Important:
-            #
-            # The temporal segment filter is allowed to use
-            # neighbouring frames, but a frame in which the display
-            # itself was NOT found must not count as a directly
-            # recognized sample.
-            #
-            # Gap filling happens later and is explicitly marked with
-            # confidence=0.
-            # --------------------------------------------------
-
-            decoded_raw: list[
-                core.DecodedSample
-            ] = []
-
-            for (
-                sample,
-                decoded,
-            ) in zip(
-                samples,
-                decoded_filtered,
-            ):
-                if sample.display_found:
-                    decoded_raw.append(
-                        decoded
-                    )
-                else:
-                    decoded_raw.append(
-                        core.DecodedSample(
-                            decoded.time_s,
-                            None,
-                            0.0,
-                        )
-                    )
-
-            display_found_count = sum(
-                sample.display_found
-                for sample in samples
-            )
-
-            recognized_count = sum(
-                sample.value is not None
-                for sample in decoded_raw
-            )
-
-            display_found_fraction = (
-                display_found_count
-                / len(samples)
-            )
-
-            recognized_fraction = (
-                recognized_count
-                / len(decoded_raw)
-            )
-
-            if display_found_count:
-                recognized_given_display = (
-                    recognized_count
-                    / display_found_count
-                )
             else:
-                recognized_given_display = (
-                    0.0
-                )
-
-            print(
-                f"Display detection: "
-                f"{100.0 * display_found_fraction:.1f}% "
-                f"({display_found_count}/{len(samples)} frames)",
-                file=sys.stderr,
-            )
-
-            print(
-                f"Digit recognition: "
-                f"{100.0 * recognized_fraction:.1f}% "
-                f"({recognized_count}/{len(decoded_raw)} frames)",
-                file=sys.stderr,
-            )
-
-            print(
-                f"Recognition when display found: "
-                f"{100.0 * recognized_given_display:.1f}%",
-                file=sys.stderr,
-            )
-
-            if args.raw_output is not None:
-                core.write_raw_csv(
-                    args.raw_output,
-                    decoded_raw,
-                )
-
-            if recognized_count == 0:
-                raise RuntimeError(
-                    "The video contains no recognized values."
-                )
-
-            filled = (
-                core.fill_unrecognized(
-                    decoded_raw
-                )
-            )
-
-            smoothed = (
-                core.centered_mode(
-                    filled,
-                    mode_window,
-                )
-            )
-
-            runs = (
-                core.make_runs(
-                    smoothed
-                )
-            )
-
-            minimum_samples = max(
-                1,
-                int(
-                    math.ceil(
-                        args.min_interval
-                        * sample_fps
+                measured_darkness = (
+                    selected_darkness_extractor(
+                        display,
+                        profile,
+                        segment_masks,
                     )
+                )
+
+                previous_shift = 0
+
+            auxiliary_darkness = None
+
+            if (
+                profile.aux_segment_percentile
+                is not None
+            ):
+                active_masks = (
+                    shift_mask_bank.get(
+                        previous_shift
+                        or 0,
+                        segment_masks,
+                    )
+                )
+
+                auxiliary_darkness = (
+                    core.extract_darkness_from_patches(
+                        core.digit_patches(
+                            display,
+                            profile,
+                        ),
+                        active_masks,
+                        segment_percentile=(
+                            profile.aux_segment_percentile
+                        ),
+                    )
+                )
+
+            samples.append(
+                core.Sample(
+                    frame_index
+                    / sample_fps,
+                    measured_darkness,
+                    display_found=True,
+                    aux_darkness=(
+                        auxiliary_darkness
+                    ),
+                    decimal_scores=(
+                        core.extract_decimal_scores(
+                            display,
+                            profile,
+                            y_shift=(
+                                previous_shift
+                                or 0
+                            ),
+                        )
+                    ),
+                    alignment_shift=(
+                        previous_shift
+                        or 0
+                    ),
+                )
+            )
+
+        if not samples:
+            raise RuntimeError(
+                "No frames were decoded from the video."
+            )
+
+        decimal_places_override = (
+            None
+            if args.decimal_places
+            == "auto"
+            else int(
+                args.decimal_places
+            )
+        )
+
+        decoded_filtered = (
+            selected_decode_samples(
+                samples,
+                profile,
+                filter_window,
+                decimal_places_override=(
+                    decimal_places_override
+                ),
+                minimum_confidence=(
+                    minimum_confidence
+                ),
+                decimal_switch_penalty=(
+                    args.decimal_switch_penalty
                 ),
             )
+        )
 
+        # --------------------------------------------------
+        # Important:
+        #
+        # The temporal segment filter is allowed to use
+        # neighbouring frames, but a frame in which the display
+        # itself was NOT found must not count as a directly
+        # recognized sample.
+        #
+        # Gap filling happens later and is explicitly marked with
+        # confidence=0.
+        # --------------------------------------------------
+
+        decoded_raw: list[
+            core.DecodedSample
+        ] = []
+
+        for (
+            sample,
+            decoded,
+        ) in zip(
+            samples,
+            decoded_filtered,
+        ):
+            if sample.display_found:
+                decoded_raw.append(
+                    decoded
+                )
+            else:
+                decoded_raw.append(
+                    core.DecodedSample(
+                        decoded.time_s,
+                        None,
+                        0.0,
+                    )
+                )
+
+        display_found_count = sum(
+            sample.display_found
+            for sample in samples
+        )
+
+        recognized_count = sum(
+            sample.value is not None
+            for sample in decoded_raw
+        )
+
+        display_found_fraction = (
+            display_found_count
+            / len(samples)
+        )
+
+        recognized_fraction = (
+            recognized_count
+            / len(decoded_raw)
+        )
+
+        if display_found_count:
+            recognized_given_display = (
+                recognized_count
+                / display_found_count
+            )
+        else:
+            recognized_given_display = (
+                0.0
+            )
+
+        print(
+            f"Display detection: "
+            f"{100.0 * display_found_fraction:.1f}% "
+            f"({display_found_count}/{len(samples)} frames)",
+            file=sys.stderr,
+        )
+
+        print(
+            f"Digit recognition: "
+            f"{100.0 * recognized_fraction:.1f}% "
+            f"({recognized_count}/{len(decoded_raw)} frames)",
+            file=sys.stderr,
+        )
+
+        print(
+            f"Recognition when display found: "
+            f"{100.0 * recognized_given_display:.1f}%",
+            file=sys.stderr,
+        )
+
+        if args.raw_output is not None:
+            core.write_raw_csv(
+                args.raw_output,
+                decoded_raw,
+            )
+
+        if recognized_count == 0:
+            raise RuntimeError(
+                "The video contains no recognized values."
+            )
+
+        filled = (
+            core.fill_unrecognized(
+                decoded_raw
+            )
+        )
+
+        smoothed = (
+            core.centered_mode(
+                filled,
+                mode_window,
+            )
+        )
+
+        runs = (
+            core.make_runs(
+                smoothed
+            )
+        )
+
+        minimum_samples = max(
+            1,
+            int(
+                math.ceil(
+                    args.min_interval
+                    * sample_fps
+                )
+            ),
+        )
+
+        runs = (
+            core.merge_short_runs(
+                runs,
+                minimum_samples,
+                preserve_edges=(
+                    profile.preserve_edge_runs
+                ),
+            )
+        )
+
+        if (
+            profile.choose_run_value_at_center
+        ):
             runs = (
-                core.merge_short_runs(
+                core.choose_run_values_from_centers(
                     runs,
-                    minimum_samples,
-                    preserve_edges=(
-                        profile.preserve_edge_runs
-                    ),
+                    filled,
                 )
             )
 
-            if (
-                profile.choose_run_value_at_center
-            ):
-                runs = (
-                    core.choose_run_values_from_centers(
-                        runs,
-                        filled,
-                    )
-                )
-
-            intervals = (
-                core.run_boundaries(
-                    runs,
-                    sample_fps,
-                    info.duration,
-                )
+        intervals = (
+            core.run_boundaries(
+                runs,
+                sample_fps,
+                info.duration,
             )
+        )
 
-            core.write_interval_csv(
-                args.output,
+        core.write_interval_csv(
+            args.output,
+            intervals,
+        )
+
+        if args.debug_dir is not None:
+            save_debug_screenshots_roi(
+                args.video,
+                info,
+                profile,
+                sample_fps,
+                args.processing_width,
                 intervals,
+                args.debug_dir,
+                roi,
+                args.contrast,
             )
 
-            if args.debug_dir is not None:
-                save_debug_screenshots_roi(
-                    args.video,
-                    info,
-                    profile,
-                    sample_fps,
-                    args.processing_width,
-                    intervals,
-                    args.debug_dir,
-                    roi,
-                    args.contrast,
-                )
+        summary_path = (
+            args.summary
+        )
 
+        if summary_path is None:
             summary_path = (
-                args.summary
-            )
-
-            if summary_path is None:
-                summary_path = (
-                    args.output.with_suffix(
-                        args.output.suffix
-                        + ".summary.json"
-                    )
-                )
-
-            summary = (
-                core.calculate_summary(
-                    intervals,
-                    args.video,
-                    profile,
-                    info.duration,
-                    display_found_fraction,
-                    recognized_fraction,
+                args.output.with_suffix(
+                    args.output.suffix
+                    + ".summary.json"
                 )
             )
 
-            summary[
-                "recognized_given_display_fraction"
-            ] = recognized_given_display
+        summary = (
+            core.calculate_summary(
+                intervals,
+                args.video,
+                profile,
+                info.duration,
+                display_found_fraction,
+                recognized_fraction,
+            )
+        )
 
-            summary[
-                "roi"
-            ] = (
-                None
-                if roi is None
-                else list(roi)
+        summary[
+            "recognized_given_display_fraction"
+        ] = recognized_given_display
+
+        summary[
+            "roi"
+        ] = (
+            None
+            if roi is None
+            else list(roi)
+        )
+
+        summary_path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        summary_path.write_text(
+            __import__(
+                "json"
+            ).dumps(
+                summary,
+                indent=2,
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        core.print_summary(
+            summary
+        )
+
+        print()
+
+        print(
+            f"Intervals written to:    {args.output}"
+        )
+
+        print(
+            f"Summary written to:      {summary_path}"
+        )
+
+        if (
+            args.raw_output
+            is not None
+        ):
+            print(
+                f"Raw samples written to:  {args.raw_output}"
             )
 
-            summary_path.parent.mkdir(
-                parents=True,
-                exist_ok=True,
+        if (
+            args.debug_dir
+            is not None
+        ):
+            print(
+                f"Debug screenshots:       {args.debug_dir}"
             )
 
-            summary_path.write_text(
-                __import__(
-                    "json"
-                ).dumps(
-                    summary,
-                    indent=2,
-                    ensure_ascii=False,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
-            core.print_summary(
-                summary
-            )
-
+        if roi is not None:
             print()
-
             print(
-                f"Intervals written to:    {args.output}"
+                "Reusable ROI:"
             )
-
             print(
-                f"Summary written to:      {summary_path}"
+                f"  --roi {format_roi(roi)}"
             )
 
-            if (
-                args.raw_output
-                is not None
-            ):
-                print(
-                    f"Raw samples written to:  {args.raw_output}"
-                )
-
-            if (
-                args.debug_dir
-                is not None
-            ):
-                print(
-                    f"Debug screenshots:       {args.debug_dir}"
-                )
-
-            if roi is not None:
-                print()
-                print(
-                    "Reusable ROI:"
-                )
-                print(
-                    f"  --roi {format_roi(roi)}"
-                )
-
-            return 0
-
-        finally:
-            core.temporal_filter = (
-                original_temporal_filter
-            )
+        return 0
 
     except (
         RuntimeError,
