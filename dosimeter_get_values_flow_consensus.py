@@ -49,6 +49,7 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -77,26 +78,22 @@ ORIGINAL_PATTERN_DECODER = (
 # ======================================================================
 
 
-STATS = {
-    "digit_calls": 0,
-    "binary_exact": 0,
-    "binary_agreed": 0,
-    "binary_overrides": 0,
-    "binary_ambiguous": 0,
-    "baseline_used": 0,
-}
-
-
-CALIBRATION = {
-    "reliable": False,
-    "off_level": float("nan"),
-    "off_spread": float("nan"),
-    "on_level": float("nan"),
-    "separation": float("nan"),
-    "threshold": float("nan"),
-    "low_count": 0,
-    "high_count": 0,
-}
+@dataclass
+class ConsensusDiagnostics:
+    digit_calls: int = 0
+    binary_exact: int = 0
+    binary_agreed: int = 0
+    binary_overrides: int = 0
+    binary_ambiguous: int = 0
+    baseline_used: int = 0
+    calibration_reliable: bool = False
+    off_level: float = float("nan")
+    off_spread: float = float("nan")
+    on_level: float = float("nan")
+    separation: float = float("nan")
+    threshold: float = float("nan")
+    low_count: int = 0
+    high_count: int = 0
 
 
 # ======================================================================
@@ -763,14 +760,13 @@ def decode_consensus_digit(
     threshold: float,
     calibration_reliable: bool,
     args: argparse.Namespace,
+    diagnostics: ConsensusDiagnostics,
 ) -> tuple[
     int | None,
     float,
 ]:
 
-    STATS[
-        "digit_calls"
-    ] += 1
+    diagnostics.digit_calls += 1
 
     (
         baseline_digit,
@@ -782,9 +778,7 @@ def decode_consensus_digit(
 
     if not calibration_reliable:
 
-        STATS[
-            "baseline_used"
-        ] += 1
+        diagnostics.baseline_used += 1
 
         return (
             baseline_digit,
@@ -805,22 +799,16 @@ def decode_consensus_digit(
         is None
     ):
 
-        STATS[
-            "binary_ambiguous"
-        ] += 1
+        diagnostics.binary_ambiguous += 1
 
-        STATS[
-            "baseline_used"
-        ] += 1
+        diagnostics.baseline_used += 1
 
         return (
             baseline_digit,
             baseline_confidence,
         )
 
-    STATS[
-        "binary_exact"
-    ] += 1
+    diagnostics.binary_exact += 1
 
     # Convert geometric distance from threshold to diagnostic
     # confidence.  This does NOT depend on digit identity.
@@ -848,9 +836,7 @@ def decode_consensus_digit(
             >= args.binary_agree_margin
         ):
 
-            STATS[
-                "binary_agreed"
-            ] += 1
+            diagnostics.binary_agreed += 1
 
             return (
                 binary_digit,
@@ -860,9 +846,7 @@ def decode_consensus_digit(
                 ),
             )
 
-        STATS[
-            "baseline_used"
-        ] += 1
+        diagnostics.baseline_used += 1
 
         return (
             baseline_digit,
@@ -885,22 +869,16 @@ def decode_consensus_digit(
         >= args.binary_override_margin
     ):
 
-        STATS[
-            "binary_overrides"
-        ] += 1
+        diagnostics.binary_overrides += 1
 
         return (
             binary_digit,
             binary_confidence,
         )
 
-    STATS[
-        "binary_ambiguous"
-    ] += 1
+    diagnostics.binary_ambiguous += 1
 
-    STATS[
-        "baseline_used"
-    ] += 1
+    diagnostics.baseline_used += 1
 
     return (
         baseline_digit,
@@ -915,6 +893,7 @@ def decode_consensus_digit(
 
 def make_consensus_decode_samples(
     args: argparse.Namespace,
+    diagnostics: ConsensusDiagnostics,
 ):
 
     def consensus_decode_samples(
@@ -995,10 +974,45 @@ def make_consensus_decode_samples(
             )
         )
 
-        CALIBRATION.clear()
-
-        CALIBRATION.update(
-            calibration
+        diagnostics.calibration_reliable = (
+            calibration[
+                "reliable"
+            ]
+        )
+        diagnostics.off_level = (
+            calibration[
+                "off_level"
+            ]
+        )
+        diagnostics.off_spread = (
+            calibration[
+                "off_spread"
+            ]
+        )
+        diagnostics.on_level = (
+            calibration[
+                "on_level"
+            ]
+        )
+        diagnostics.separation = (
+            calibration[
+                "separation"
+            ]
+        )
+        diagnostics.threshold = (
+            calibration[
+                "threshold"
+            ]
+        )
+        diagnostics.low_count = (
+            calibration[
+                "low_count"
+            ]
+        )
+        diagnostics.high_count = (
+            calibration[
+                "high_count"
+            ]
         )
 
         patterns = (
@@ -1058,6 +1072,7 @@ def make_consensus_decode_samples(
                             ]
                         ),
                         args,
+                        diagnostics,
                     )
                 )
 
@@ -1325,13 +1340,9 @@ def restore_decode_hooks(
 
 def main() -> int:
 
-    for key in (
-        STATS
-    ):
-
-        STATS[
-            key
-        ] = 0
+    diagnostics = (
+        ConsensusDiagnostics()
+    )
 
     wrapper_args, remaining = (
         parse_wrapper_args(
@@ -1406,7 +1417,8 @@ def main() -> int:
 
     replacement = (
         make_consensus_decode_samples(
-            wrapper_args
+            wrapper_args,
+            diagnostics,
         )
     )
 
@@ -1461,52 +1473,49 @@ def main() -> int:
     )
 
     if bool(
-        CALIBRATION.get(
-            "reliable",
-            False,
-        )
+        diagnostics.calibration_reliable
     ):
 
         print(
             (
                 f"  OFF level       : "
-                f"{float(CALIBRATION['off_level']):.3f}"
+                f"{float(diagnostics.off_level):.3f}"
             )
         )
 
         print(
             (
                 f"  OFF robust sigma: "
-                f"{float(CALIBRATION['off_spread']):.3f}"
+                f"{float(diagnostics.off_spread):.3f}"
             )
         )
 
         print(
             (
                 f"  high population : "
-                f"{float(CALIBRATION['on_level']):.3f}"
+                f"{float(diagnostics.on_level):.3f}"
             )
         )
 
         print(
             (
                 f"  separation      : "
-                f"{float(CALIBRATION['separation']):.3f}"
+                f"{float(diagnostics.separation):.3f}"
             )
         )
 
         print(
             (
                 f"  ACTIVE threshold: "
-                f"{float(CALIBRATION['threshold']):.3f}"
+                f"{float(diagnostics.threshold):.3f}"
             )
         )
 
         print(
             (
                 f"  cluster sizes   : "
-                f"{int(CALIBRATION['low_count'])} / "
-                f"{int(CALIBRATION['high_count'])}"
+                f"{int(diagnostics.low_count)} / "
+                f"{int(diagnostics.high_count)}"
             )
         )
 
@@ -1535,42 +1544,42 @@ def main() -> int:
     print(
         (
             f"  digit calls       : "
-            f"{STATS['digit_calls']}"
+            f"{diagnostics.digit_calls}"
         )
     )
 
     print(
         (
             f"  exact patterns    : "
-            f"{STATS['binary_exact']}"
+            f"{diagnostics.binary_exact}"
         )
     )
 
     print(
         (
             f"  agreement used    : "
-            f"{STATS['binary_agreed']}"
+            f"{diagnostics.binary_agreed}"
         )
     )
 
     print(
         (
             f"  generic overrides : "
-            f"{STATS['binary_overrides']}"
+            f"{diagnostics.binary_overrides}"
         )
     )
 
     print(
         (
             f"  ambiguous binary  : "
-            f"{STATS['binary_ambiguous']}"
+            f"{diagnostics.binary_ambiguous}"
         )
     )
 
     print(
         (
             f"  baseline used     : "
-            f"{STATS['baseline_used']}"
+            f"{diagnostics.baseline_used}"
         )
     )
 
