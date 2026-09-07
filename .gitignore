@@ -26,3 +26,16 @@ debug*/
 
 # Temporary archives
 *.zip
+
+# Unrelated ECh/SFG material living next to this project
+Davky-*_UK-MFF-UCJF.xlsx
+SFG_ECh_*.pdf
+SFG_ECh_*.dat
+SFG_ECh_*.gp
+experimental_log.txt
+fit.log
+
+# Older OCR result files
+mov*.csv
+mov*_debug/
+mov*-debug/

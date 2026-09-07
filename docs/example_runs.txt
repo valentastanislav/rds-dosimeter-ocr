@@ -1,0 +1,30 @@
+Instalace na macOS (predpoklada pouzivani spravce balicku Homebrew):
+brew install ffmpeg
+python3 -m pip install -r requirements_dosimeter.txt --break-system-packages
+
+Pro RDS-30:
+python3 dosimeter_get_values.py IMG_0754.MOV mov0754.csv --profile rds30
+
+Pro RDS-200:
+python3 dosimeter_get_values.py IMG_0742.MOV mov742.csv --profile rds200
+
+Volitelně lze uložit i hodnotu pro každý analyzovaný snímek a nechat ulozit screenshoty:
+
+python3 dosimeter_get_values.py \
+    IMG_0747.mov mov0747.csv \
+    --profile rds200 \
+    --raw-output mov0747_raw.csv \
+    --debug-dir mov0747_debug
+
+Skript se snaží automaticky detekovat tečku, nicméně její pozici lze případně vynutit:
+napr. pro rds200
+# Hodnoty typu 6.30
+--decimal-places 2
+
+# Hodnoty typu 60.6
+--decimal-places 1
+
+Snimky jsou znamkovany parametrem "confidence" a muzou byt zahazovany, threshold se da zvednout z defaultniho takto:
+--min-confidence 0.10 \
+tzn.
+$ python3 dosimeter_get_values.py IMG_0752.MOV mov0752.csv --profile rds30 --debug-dir mov0752-debug --min-confidence 0.10
