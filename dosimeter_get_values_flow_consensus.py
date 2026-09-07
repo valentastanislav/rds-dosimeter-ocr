@@ -1416,15 +1416,6 @@ def main() -> int:
         )
     )
 
-    saved_argv = (
-        sys.argv
-    )
-
-    sys.argv = [
-        saved_argv[0],
-        *remaining,
-    ]
-
     print(
         "RDS-200 generic binary-consensus decoder:"
     )
@@ -1447,15 +1438,12 @@ def main() -> int:
     try:
 
         result = (
-            flow.main()
+            flow.main(
+                remaining
+            )
         )
 
     finally:
-
-        sys.argv = (
-            saved_argv
-        )
-
         restore_decode_hooks(
             patched
         )

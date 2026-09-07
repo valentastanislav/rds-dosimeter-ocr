@@ -1825,13 +1825,19 @@ def make_cached_debug_writer(
 # ======================================================================
 
 
-def main() -> int:
+def main(
+    argv: Sequence[str] | None = None,
+) -> int:
+
+    selected_argv = (
+        sys.argv[1:]
+        if argv is None
+        else list(argv)
+    )
 
     wrapper_args, remaining = (
         parse_wrapper_args(
-            sys.argv[
-                1:
-            ]
+            selected_argv
         )
     )
 
