@@ -95,9 +95,6 @@ RDS200_LOCAL_SEGMENT_MEASUREMENT = (
     )
 )
 
-
-CONTRAST_MODE = "auto"
-
 ORIGINAL_EXTRACT_DARKNESS = (
     core.extract_darkness
 )
@@ -651,6 +648,9 @@ def fixed_extract_darkness(
     profile: core.Profile,
     segment_masks,
     segment_percentile: float = 50.0,
+    *,
+    contrast_mode: str,
+    measurement_config: LocalSegmentMeasurementConfig,
 ) -> np.ndarray:
     del segment_masks
     del segment_percentile
@@ -675,11 +675,11 @@ def fixed_extract_darkness(
         local_darkness(
             raw_patches,
             profile,
-            RDS200_LOCAL_SEGMENT_MEASUREMENT,
+            measurement_config,
         )
     )
 
-    if CONTRAST_MODE == "none":
+    if contrast_mode == "none":
         return raw_darkness
 
     enhanced_patches = (
@@ -692,11 +692,11 @@ def fixed_extract_darkness(
         local_darkness(
             enhanced_patches,
             profile,
-            RDS200_LOCAL_SEGMENT_MEASUREMENT,
+            measurement_config,
         )
     )
 
-    if CONTRAST_MODE == "clahe":
+    if contrast_mode == "clahe":
         return enhanced_darkness
 
     # auto:
@@ -726,6 +726,28 @@ def fixed_extract_darkness(
         return enhanced_darkness
 
     return raw_darkness
+
+
+def make_fixed_extract_darkness(
+    contrast_mode: str,
+    measurement_config: LocalSegmentMeasurementConfig,
+):
+    def configured_fixed_extract_darkness(
+        display: np.ndarray,
+        profile: core.Profile,
+        segment_masks,
+        segment_percentile: float = 50.0,
+    ) -> np.ndarray:
+        return fixed_extract_darkness(
+            display,
+            profile,
+            segment_masks,
+            segment_percentile=segment_percentile,
+            contrast_mode=contrast_mode,
+            measurement_config=measurement_config,
+        )
+
+    return configured_fixed_extract_darkness
 
 
 # ======================================================================
@@ -779,8 +801,6 @@ def make_rectified_finder(
 
 
 def main() -> int:
-    global CONTRAST_MODE
-
     extra, remaining = (
         parse_extra_args()
     )
@@ -995,10 +1015,6 @@ def main() -> int:
         # Install fixed profile and fixed extraction
         # ==========================================================
 
-        CONTRAST_MODE = (
-            args.contrast
-        )
-
         original_profile = (
             core.PROFILES["rds200"]
         )
@@ -1016,7 +1032,10 @@ def main() -> int:
         ] = fixed_profile
 
         core.extract_darkness = (
-            fixed_extract_darkness
+            make_fixed_extract_darkness(
+                args.contrast,
+                RDS200_LOCAL_SEGMENT_MEASUREMENT,
+            )
         )
 
         roi_app.find_display_crop_roi = (
