@@ -43,7 +43,7 @@ import math
 import subprocess
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 import cv2
 import numpy as np
@@ -60,6 +60,14 @@ except ImportError as exc:
 
 ROI = tuple[float, float, float, float]
 Box = tuple[int, int, int, int]
+DarknessExtractor = Callable[
+    [
+        np.ndarray,
+        core.Profile,
+        Sequence[np.ndarray],
+    ],
+    np.ndarray,
+]
 
 
 # Keep the original detector.  With no ROI, the new script can therefore
@@ -1532,8 +1540,15 @@ def validate_args(
 
 def main(
     argv: Sequence[str] | None = None,
+    darkness_extractor: DarknessExtractor | None = None,
 ) -> int:
     args = parse_args(argv)
+
+    selected_darkness_extractor = (
+        core.extract_darkness
+        if darkness_extractor is None
+        else darkness_extractor
+    )
 
     try:
         validate_args(
@@ -1732,7 +1747,7 @@ def main(
 
                 else:
                     measured_darkness = (
-                        core.extract_darkness(
+                        selected_darkness_extractor(
                             display,
                             profile,
                             segment_masks,

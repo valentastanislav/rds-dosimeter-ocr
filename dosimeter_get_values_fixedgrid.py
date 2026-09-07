@@ -1015,10 +1015,6 @@ def main(
             core.PROFILES["rds200"]
         )
 
-        original_extract = (
-            core.extract_darkness
-        )
-
         original_finder = (
             roi_app.find_display_crop_roi
         )
@@ -1027,7 +1023,7 @@ def main(
             "rds200"
         ] = fixed_profile
 
-        core.extract_darkness = (
+        darkness_extractor = (
             make_fixed_extract_darkness(
                 args.contrast,
                 RDS200_LOCAL_SEGMENT_MEASUREMENT,
@@ -1047,7 +1043,10 @@ def main(
         try:
             result = (
                 roi_app.main(
-                    remaining
+                    remaining,
+                    darkness_extractor=(
+                        darkness_extractor
+                    ),
                 )
             )
 
@@ -1055,10 +1054,6 @@ def main(
             core.PROFILES[
                 "rds200"
             ] = original_profile
-
-            core.extract_darkness = (
-                original_extract
-            )
 
             roi_app.find_display_crop_roi = (
                 original_finder
