@@ -50,8 +50,19 @@ start_s   value
 54.3      0.69
 62.1      0.65
 
-Evaluation ignores +/-0.4 s aroundEvaluation ignores +/-0.4 s aroundphEvaluation ignores +/-0.iefly shows trEvaluation ignores +/-0.4 s aroundEvaluation ignores +/-0.4 s aroundphEvpiEvaluation ignores +/-0.4 s aroundEvaluation ignores +/-0.4 s arou
-VaVaVaVaVaVaVaVaVaVaVaVaVaVaVaVaVaVaVaVaVable rVaVaVaVaVaVaVaVaVa-----VaVaVaVaVaVaVaV----VaVaVaVaVaVaVaVaVaVaVaVaVaVa  VaVaVaVaVaVaVaVaVa     VaVaVaVaVaVaVaVaht8         VaVaVaVaVaVaVaVaVaVaVaVaVaVaVaVaVaVigiVaVaVaVaVaVaVaVh
+Evaluation ignores +/-0.4 s around real LCD transitions because the
+physical display itself briefly shows transition values.
+
+Do NOT ignore t=0; the early tracking error is a real pipeline problem.
+
+## Raw benchmark
+
+Stable evaluated samples: 283.
+
+Variant             exact accuracy    notable result
+------------------------------------------------------
+tight               76.68 %           baseline
+tight8              77.39 %           deprecated digit-specific patch
 consensus           78.45 %           bad large 8.82 errors
 consensus2          78.45 %           MAE improved to 0.10396
 
@@ -73,7 +84,9 @@ OCR: 4.11
 
 Cause is believed to be stabilization/geometry, not digit decoding.
 
-Do not hard-code the first 1.4 seconds asDo not hard-c# Do no0.61, rougDo not hard-c8 s
+Do not hard-code the first 1.4 seconds as invalid.
+
+### True 0.61, roughly 21.2--28.8 s
 
 Intermittent third-digit errors:
 
@@ -86,12 +99,30 @@ segment.
 
 ### True 0.69, roughly 54.3--62.1 s
 
-ConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConerConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiCondiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsiConsi seConsiConsiCotor.
+Consistently decoded as:
 
+0.69 -> 0.65
 
-onsiConsiConsiConst currently measures:
+For the third digit, the upper-right and lower-right segment evidence
+collapses late in the video even though the physical glyph is 9.
 
-segmesegmesegmesegmesegmesegme insisegmesegmesegmesegmesegmesegme insisegmesegmesegmesegmesegmesegme insg asegmesegmesegmesegmesegmesegme ackground_level - segment_level
+This points strongly toward extraction/geometry rather than merely
+decoder thresholds.
+
+## Important extraction discovery
+
+dosimeter_get_values_fixedgrid.py has its own local segment extractor.
+
+For every segment it currently measures:
+
+segment level:
+35th percentile inside the segment mask
+
+background level:
+70th percentile in a local ring around the segment
+
+darkness =
+background_level - segment_level
 
 These values are currently hard-coded.
 
@@ -103,16 +134,74 @@ fixed-grid extraction.
 
 This is the next clean experimental target after architecture cleanup.
 
+## Current successful geometry strategy
 
-his is the next clean experimental target after architecture cleanabhis ision:his is the next clean experimentalay his is the next clean experimental target after architecture cleanabhis ision:his is the next clean experimentalay his is the next clean experimental target after architecture cleanabhis ision:his is the next clean experimentalay his is the next clean experimental target after architecture cleanabhis ision:his is the next clean experimentalay his is the next clean      his is the next clean experimental tked phis is the next clean experimental target after architecture cleanabhis ision:his is the next clean experimentalay his is the next clean experimental target after archi.
+Sequential optical-flow stabilization:
 
+1. determine one reference display box
+2. track static features with pyramidal Lucas-Kanade optical flow
+3. estimate frame-to-frame similarity transform with RANSAC
+4. accumulate transform to reference
+5. stabilize frame
+6. use fixed display crop
+7. apply fixed perspective quad
+8. apply fixed digit grid
+9. decode
 
-is is the next clean experimental tthis cache.
+Typical diagnostics:
 
-Do not reintroduce a separate geometry pass for debug generatioDo not reintroduce a separate geometry pass for debthoDo not reintroduce a separate geometry pass for debug gener maDo not reintroduce a pective + adaptive y shift
+steps               330
+accepted motion     329
+rejected motion       1
+point redetections   32
+mean tracked pts    ~90
+mean RANSAC inliers ~90
+
+## Debug invariant
+
+dosimeter_get_values_flow.py caches the stabilized + perspective-
+rectified display during the MAIN decoding pass.
+
+Debug JPGs must always be made from this cache.
+
+Do not reintroduce a separate geometry pass for debug generation.
+
+## Deprecated approaches
+
+Do not reintroduce without new evidence:
+
+- automatic ROI without robust tracking
+- manual ROI alone
+- perspective + adaptive y shift
 - fixed grid without tracking
 - ECC homography
-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ing
+- rigid ECC
+- four-corner template tracking
+- translation-only ECC
+- track-time 2.2 with the current quad/grid
+- digit-specific 6->8 correction
+- independent per-position/per-segment unsupervised ON/OFF clustering
+- RDS-200 mode-window 5
+- hard-coded expected values
+- hard-coded allowed dose ranges
+- hard-coded removal of the first 1.4 s
+- debug geometry recomputation
+
+## Cleanup objective
+
+Replace the current chain of runtime monkey-patched front-ends with
+explicit components.
+
+Desired conceptual pipeline:
+
+video input
+    -> geometry/stabilization
+    -> rectified display
+    -> digit geometry
+    -> segment measurement
+    -> temporal filtering
+    -> digit decoding
+    -> decimal decoding
     -> interval construction
     -> diagnostics/output
 
