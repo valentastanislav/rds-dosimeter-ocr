@@ -1,0 +1,28 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Input videos - too large for normal Git
+*.MOV
+*.mov
+*.mp4
+*.MP4
+
+# OCR generated output
+raw_*.csv
+out_*.csv
+*.summary.json
+segment_diagnostics.csv
+
+# Debug output
+debug/
+debug_*/
+debug*/
+
+# Temporary archives
+*.zip
