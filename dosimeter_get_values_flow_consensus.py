@@ -54,8 +54,6 @@ from dataclasses import dataclass
 import numpy as np
 
 import dosimeter_get_values as core
-import dosimeter_get_values_roi as roi_app
-import dosimeter_get_values_fixedgrid as fixed_app
 import dosimeter_get_values_flow as flow
 
 
@@ -887,7 +885,7 @@ def decode_consensus_digit(
 
 
 # ======================================================================
-# Replacement decode_samples()
+# Consensus decode_samples()
 # ======================================================================
 
 
@@ -1268,72 +1266,6 @@ def make_consensus_decode_samples(
 
 
 # ======================================================================
-# Patch aliases
-# ======================================================================
-
-
-def install_decode_hook(
-    replacement,
-):
-
-    patched = []
-
-    for module in (
-        core,
-        roi_app,
-        fixed_app,
-        flow,
-    ):
-
-        if not hasattr(
-            module,
-            "decode_samples",
-        ):
-
-            continue
-
-        original = getattr(
-            module,
-            "decode_samples",
-        )
-
-        if (
-            original
-            is ORIGINAL_DECODE_SAMPLES
-        ):
-
-            setattr(
-                module,
-                "decode_samples",
-                replacement,
-            )
-
-            patched.append(
-                (
-                    module,
-                    original,
-                )
-            )
-
-    return patched
-
-
-def restore_decode_hooks(
-    patched,
-) -> None:
-
-    for module, original in (
-        patched
-    ):
-
-        setattr(
-            module,
-            "decode_samples",
-            original,
-        )
-
-
-# ======================================================================
 # Main
 # ======================================================================
 
@@ -1415,16 +1347,10 @@ def main() -> int:
         transformed_polygons
     )
 
-    replacement = (
+    consensus_decoder = (
         make_consensus_decode_samples(
             wrapper_args,
             diagnostics,
-        )
-    )
-
-    patched = (
-        install_decode_hook(
-            replacement
         )
     )
 
@@ -1451,15 +1377,14 @@ def main() -> int:
 
         result = (
             flow.main(
-                remaining
+                remaining,
+                decode_samples=(
+                    consensus_decoder
+                ),
             )
         )
 
     finally:
-        restore_decode_hooks(
-            patched
-        )
-
         polygons.clear()
 
         polygons.update(
@@ -1535,10 +1460,7 @@ def main() -> int:
     )
 
     print(
-        (
-            f"  patched aliases   : "
-            f"{len(patched)}"
-        )
+        "  decoder injection : explicit"
     )
 
     print(

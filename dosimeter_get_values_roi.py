@@ -68,6 +68,10 @@ DarknessExtractor = Callable[
     ],
     np.ndarray,
 ]
+DecodeSamples = Callable[
+    ...,
+    list[core.DecodedSample],
+]
 
 
 # Keep the original detector.  With no ROI, the new script can therefore
@@ -1542,6 +1546,7 @@ def main(
     argv: Sequence[str] | None = None,
     darkness_extractor: DarknessExtractor | None = None,
     profile_override: core.Profile | None = None,
+    decode_samples: DecodeSamples | None = None,
 ) -> int:
     args = parse_args(argv)
 
@@ -1549,6 +1554,12 @@ def main(
         core.extract_darkness
         if darkness_extractor is None
         else darkness_extractor
+    )
+
+    selected_decode_samples = (
+        core.decode_samples
+        if decode_samples is None
+        else decode_samples
     )
 
     try:
@@ -1829,7 +1840,7 @@ def main(
             )
 
             decoded_filtered = (
-                core.decode_samples(
+                selected_decode_samples(
                     samples,
                     profile,
                     filter_window,

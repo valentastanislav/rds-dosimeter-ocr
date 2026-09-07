@@ -1827,6 +1827,7 @@ def make_cached_debug_writer(
 
 def main(
     argv: Sequence[str] | None = None,
+    decode_samples: roi_app.DecodeSamples | None = None,
 ) -> int:
 
     selected_argv = (
@@ -2145,7 +2146,10 @@ def main(
         try:
             result = (
                 fixed_app.main(
-                    remaining
+                    remaining,
+                    decode_samples=(
+                        decode_samples
+                    ),
                 )
             )
 
