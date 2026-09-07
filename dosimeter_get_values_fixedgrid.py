@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 import cv2
 import numpy as np
@@ -80,6 +80,21 @@ Grid = tuple[
     float,
     float,
 ]
+
+
+@dataclass(frozen=True)
+class LocalSegmentMeasurementConfig:
+    segment_percentile: float
+    background_percentile: float
+
+
+RDS200_LOCAL_SEGMENT_MEASUREMENT = (
+    LocalSegmentMeasurementConfig(
+        segment_percentile=35.0,
+        background_percentile=70.0,
+    )
+)
+
 
 CONTRAST_MODE = "auto"
 
@@ -552,6 +567,7 @@ def make_local_masks(
 def local_darkness(
     patches,
     profile: core.Profile,
+    config: LocalSegmentMeasurementConfig,
 ) -> np.ndarray:
     segment_masks, rings = (
         make_local_masks(
@@ -602,7 +618,7 @@ def local_darkness(
             segment_level = float(
                 np.percentile(
                     segment_pixels,
-                    35,
+                    config.segment_percentile,
                 )
             )
 
@@ -610,7 +626,7 @@ def local_darkness(
             background_level = float(
                 np.percentile(
                     background_pixels,
-                    70,
+                    config.background_percentile,
                 )
             )
 
@@ -659,6 +675,7 @@ def fixed_extract_darkness(
         local_darkness(
             raw_patches,
             profile,
+            RDS200_LOCAL_SEGMENT_MEASUREMENT,
         )
     )
 
@@ -675,6 +692,7 @@ def fixed_extract_darkness(
         local_darkness(
             enhanced_patches,
             profile,
+            RDS200_LOCAL_SEGMENT_MEASUREMENT,
         )
     )
 
