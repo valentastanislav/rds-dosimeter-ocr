@@ -1541,6 +1541,7 @@ def validate_args(
 def main(
     argv: Sequence[str] | None = None,
     darkness_extractor: DarknessExtractor | None = None,
+    profile_override: core.Profile | None = None,
 ) -> int:
     args = parse_args(argv)
 
@@ -1555,9 +1556,13 @@ def main(
             args
         )
 
-        profile = core.PROFILES[
-            args.profile
-        ]
+        profile = (
+            core.PROFILES[
+                args.profile
+            ]
+            if profile_override is None
+            else profile_override
+        )
 
         sample_fps = (
             args.sample_fps

@@ -1008,20 +1008,12 @@ def main(
         )
 
         # ==========================================================
-        # Install fixed profile and fixed extraction
+        # Configure fixed profile and fixed extraction
         # ==========================================================
-
-        original_profile = (
-            core.PROFILES["rds200"]
-        )
 
         original_finder = (
             roi_app.find_display_crop_roi
         )
-
-        core.PROFILES[
-            "rds200"
-        ] = fixed_profile
 
         darkness_extractor = (
             make_fixed_extract_darkness(
@@ -1047,14 +1039,13 @@ def main(
                     darkness_extractor=(
                         darkness_extractor
                     ),
+                    profile_override=(
+                        fixed_profile
+                    ),
                 )
             )
 
         finally:
-            core.PROFILES[
-                "rds200"
-            ] = original_profile
-
             roi_app.find_display_crop_roi = (
                 original_finder
             )
