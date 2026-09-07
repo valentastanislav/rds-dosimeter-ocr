@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass, replace
+from typing import Sequence
 
 import cv2
 import numpy as np
@@ -165,7 +166,9 @@ def format_grid(
 # ======================================================================
 
 
-def parse_extra_args() -> tuple[
+def parse_extra_args(
+    argv: Sequence[str] | None = None,
+) -> tuple[
     argparse.Namespace,
     list[str],
 ]:
@@ -196,7 +199,7 @@ def parse_extra_args() -> tuple[
         default=None,
     )
 
-    return parser.parse_known_args()
+    return parser.parse_known_args(argv)
 
 
 def parse_roi_args(
@@ -791,9 +794,11 @@ def make_rectified_finder(
 # ======================================================================
 
 
-def main() -> int:
+def main(
+    argv: Sequence[str] | None = None,
+) -> int:
     extra, remaining = (
-        parse_extra_args()
+        parse_extra_args(argv)
     )
 
     args = parse_roi_args(

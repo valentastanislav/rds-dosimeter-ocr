@@ -1835,41 +1835,24 @@ def main() -> int:
         )
     )
 
-    saved_argv = (
-        sys.argv
-    )
-
     # ----------------------------------------------------------
     # Parse normal fixed-grid / ROI arguments
     # ----------------------------------------------------------
 
-    try:
-
-        sys.argv = [
-            saved_argv[
-                0
-            ],
-            *remaining,
-        ]
-
-        (
-            fixed_extra,
-            roi_remaining,
-        ) = (
-            fixed_app.parse_extra_args()
+    (
+        fixed_extra,
+        roi_remaining,
+    ) = (
+        fixed_app.parse_extra_args(
+            remaining
         )
+    )
 
-        args = (
-            fixed_app.parse_roi_args(
-                roi_remaining
-            )
+    args = (
+        fixed_app.parse_roi_args(
+            roi_remaining
         )
-
-    finally:
-
-        sys.argv = (
-            saved_argv
-        )
+    )
 
     if args.roi is None:
 
@@ -2154,24 +2137,13 @@ def main() -> int:
         # ----------------------------------------------------------
 
         try:
-
-            sys.argv = [
-                saved_argv[
-                    0
-                ],
-                *remaining,
-            ]
-
             result = (
-                fixed_app.main()
+                fixed_app.main(
+                    remaining
+                )
             )
 
         finally:
-
-            sys.argv = (
-                saved_argv
-            )
-
             fixed_app.make_rectified_finder = (
                 original_factory
             )
