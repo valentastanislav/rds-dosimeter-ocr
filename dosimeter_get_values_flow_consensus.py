@@ -49,7 +49,7 @@ from __future__ import annotations
 import argparse
 import math
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -1311,23 +1311,19 @@ def main() -> int:
         return 1
 
     # ----------------------------------------------------------
-    # Install the tight-grid geometry.
+    # Construct the tight-grid geometry.
     # ----------------------------------------------------------
 
-    profile = (
+    original_profile = (
         core.PROFILES[
             "rds200"
         ]
     )
 
-    polygons = (
-        profile.segment_polygons
-    )
-
     original_polygons = {
         name: polygon.copy()
         for name, polygon
-        in polygons.items()
+        in original_profile.segment_polygons.items()
     }
 
     transformed_polygons = {
@@ -1341,10 +1337,11 @@ def main() -> int:
         in original_polygons.items()
     }
 
-    polygons.clear()
-
-    polygons.update(
-        transformed_polygons
+    tight_profile = replace(
+        original_profile,
+        segment_polygons=(
+            transformed_polygons
+        ),
     )
 
     consensus_decoder = (
@@ -1373,23 +1370,17 @@ def main() -> int:
         "  expected values used: NONE"
     )
 
-    try:
-
-        result = (
-            flow.main(
-                remaining,
-                decode_samples=(
-                    consensus_decoder
-                ),
-            )
+    result = (
+        flow.main(
+            remaining,
+            decode_samples=(
+                consensus_decoder
+            ),
+            profile_override=(
+                tight_profile
+            ),
         )
-
-    finally:
-        polygons.clear()
-
-        polygons.update(
-            original_polygons
-        )
+    )
 
     print()
 

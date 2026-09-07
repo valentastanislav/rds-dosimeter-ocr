@@ -797,6 +797,7 @@ def make_rectified_finder(
 def main(
     argv: Sequence[str] | None = None,
     decode_samples: roi_app.DecodeSamples | None = None,
+    base_profile_override: core.Profile | None = None,
 ) -> int:
     extra, remaining = (
         parse_extra_args(argv)
@@ -853,6 +854,8 @@ def main(
 
         base_profile = (
             ORIGINAL_RDS200_PROFILE
+            if base_profile_override is None
+            else base_profile_override
         )
 
         sample_fps = (

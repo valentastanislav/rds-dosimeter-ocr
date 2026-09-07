@@ -1828,6 +1828,7 @@ def make_cached_debug_writer(
 def main(
     argv: Sequence[str] | None = None,
     decode_samples: roi_app.DecodeSamples | None = None,
+    profile_override: core.Profile | None = None,
 ) -> int:
 
     selected_argv = (
@@ -1876,6 +1877,8 @@ def main(
             core.PROFILES[
                 args.profile
             ]
+            if profile_override is None
+            else profile_override
         )
 
         info = (
@@ -2149,6 +2152,9 @@ def main(
                     remaining,
                     decode_samples=(
                         decode_samples
+                    ),
+                    base_profile_override=(
+                        profile
                     ),
                 )
             )
