@@ -1,0 +1,64 @@
+Ground truth:
+  interval  1: start=  0.0 s  value=0.420
+  interval  2: start=  3.2 s  value=0.390
+  interval  3: start=  7.7 s  value=0.370
+  interval  4: start= 13.7 s  value=0.350
+  interval  5: start= 16.8 s  value=0.420
+  interval  6: start= 19.8 s  value=0.480
+  interval  7: start= 21.2 s  value=0.610
+  interval  8: start= 28.8 s  value=0.540
+  interval  9: start= 36.2 s  value=0.560
+  interval 10: start= 40.7 s  value=0.640
+  interval 11: start= 46.8 s  value=0.660
+  interval 12: start= 54.3 s  value=0.690
+  interval 13: start= 62.1 s  value=0.650
+
+Transition guard: +/- 0.400 s
+
+==========================================================================
+raw_baseline.csv
+==========================================================================
+Raw samples in truth range : 331
+Ignored near transitions   : 48
+Evaluated stable samples   : 283
+Recognized stable samples  : 283 (100.00%)
+Correct stable samples     : 222
+Wrong stable samples       : 61
+Missing stable samples     : 0
+Overall exact accuracy     : 78.45%
+Accuracy when recognized   : 78.45%
+Mean absolute error        : 0.10396
+
+Per true interval:
+  int   start    truth   eval   correct   wrong   missing   accuracy
+    1     0.0     0.42     15         8       7         0      53.3%
+    2     3.2     0.39     18        18       0         0     100.0%
+    3     7.7     0.37     26        26       0         0     100.0%
+    4    13.7     0.35     12        12       0         0     100.0%
+    5    16.8     0.42     11        11       0         0     100.0%
+    6    19.8     0.48      2         2       0         0     100.0%
+    7    21.2     0.61     35        16      19         0      45.7%
+    8    28.8     0.54     33        33       0         0     100.0%
+    9    36.2     0.56     18        18       0         0     100.0%
+   10    40.7     0.64     26        26       0         0     100.0%
+   11    46.8     0.66     34        34       0         0     100.0%
+   12    54.3     0.69     35         0      35         0       0.0%
+   13    62.1     0.65     18        18       0         0     100.0%
+
+Most frequent wrong value pairs:
+  true   0.690 -> OCR   0.650 :   35 samples
+  true   0.610 -> OCR   0.820 :   10 samples
+  true   0.610 -> OCR   0.620 :    9 samples
+  true   0.420 -> OCR   4.110 :    7 samples
+
+Longest stable-region OCR error runs:
+   54.80 ..  61.60 s  ( 6.80 s,  35 samples) : true 0.690 -> OCR 0.650
+    0.00 ..   1.20 s  ( 1.20 s,   7 samples) : true 0.420 -> OCR 4.110
+   27.60 ..  28.40 s  ( 0.80 s,   5 samples) : true 0.610 -> OCR 0.820
+   23.00 ..  23.60 s  ( 0.60 s,   4 samples) : true 0.610 -> OCR 0.620
+   26.00 ..  26.60 s  ( 0.60 s,   4 samples) : true 0.610 -> OCR 0.820
+   25.40 ..  25.80 s  ( 0.40 s,   3 samples) : true 0.610 -> OCR 0.620
+   22.40 ..  22.60 s  ( 0.20 s,   2 samples) : true 0.610 -> OCR 0.620
+   22.80 ..  22.80 s  ( 0.00 s,   1 samples) : true 0.610 -> OCR 0.820
+
+Detailed evaluation CSV: raw_baseline.eval.csv
