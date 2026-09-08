@@ -1439,7 +1439,7 @@ def make_cached_debug_writer(
     decimal_override: int | None,
 ):
     """
-    Build a replacement for core.save_debug_screenshots().
+    Build a cached writer compatible with core.save_debug_screenshots().
 
     It NEVER reopens or reprocesses video frames.
 
@@ -2120,14 +2120,10 @@ def main(
         )
 
         # ------------------------------------------------------
-        # Replace debug writer.
+        # Construct cached debug writer.
         #
         # It will read ONLY display_cache.
         # ----------------------------------------------------------
-
-        original_debug_writer = (
-            core.save_debug_screenshots
-        )
 
         cached_debug_writer = (
             make_cached_debug_writer(
@@ -2136,10 +2132,6 @@ def main(
                 captured_decimal_sequence,
                 decimal_override,
             )
-        )
-
-        core.save_debug_screenshots = (
-            cached_debug_writer
         )
 
         # ------------------------------------------------------
@@ -2156,16 +2148,15 @@ def main(
                     base_profile_override=(
                         profile
                     ),
+                    debug_writer=(
+                        cached_debug_writer
+                    ),
                 )
             )
 
         finally:
             fixed_app.make_rectified_finder = (
                 original_factory
-            )
-
-            core.save_debug_screenshots = (
-                original_debug_writer
             )
 
             core.decode_decimal_places_sequence = (

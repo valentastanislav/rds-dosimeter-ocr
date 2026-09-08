@@ -72,6 +72,7 @@ DecodeSamples = Callable[
     ...,
     list[core.DecodedSample],
 ]
+DebugWriter = Callable[..., None]
 
 
 # Keep the original detector.  With no ROI, the new script can therefore
@@ -1092,6 +1093,7 @@ def save_debug_screenshots_roi(
     output_dir: Path,
     roi: ROI | None,
     contrast_mode: str,
+    debug_writer: DebugWriter,
 ) -> None:
     old_finder = core.find_display_crop
 
@@ -1115,7 +1117,7 @@ def save_debug_screenshots_roi(
     )
 
     try:
-        core.save_debug_screenshots(
+        debug_writer(
             video,
             info,
             profile,
@@ -1451,6 +1453,7 @@ def main(
     darkness_extractor: DarknessExtractor | None = None,
     profile_override: core.Profile | None = None,
     decode_samples: DecodeSamples | None = None,
+    debug_writer: DebugWriter | None = None,
 ) -> int:
     args = parse_args(argv)
 
@@ -1464,6 +1467,12 @@ def main(
         core.decode_samples
         if decode_samples is None
         else decode_samples
+    )
+
+    selected_debug_writer = (
+        core.save_debug_screenshots
+        if debug_writer is None
+        else debug_writer
     )
 
     try:
@@ -1919,6 +1928,7 @@ def main(
                 args.debug_dir,
                 roi,
                 args.contrast,
+                selected_debug_writer,
             )
 
         summary_path = (

@@ -798,6 +798,7 @@ def main(
     argv: Sequence[str] | None = None,
     decode_samples: roi_app.DecodeSamples | None = None,
     base_profile_override: core.Profile | None = None,
+    debug_writer: roi_app.DebugWriter | None = None,
 ) -> int:
     extra, remaining = (
         parse_extra_args(argv)
@@ -1048,6 +1049,9 @@ def main(
                     ),
                     decode_samples=(
                         decode_samples
+                    ),
+                    debug_writer=(
+                        debug_writer
                     ),
                 )
             )
