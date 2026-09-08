@@ -27,7 +27,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 import cv2
 import numpy as np
@@ -85,6 +85,19 @@ class Profile:
     aux_segment_percentile: float | None = None
     hybrid_pattern_margin: float = 0.10
     leading_blank_threshold: float | None = None
+
+
+DisplayFinder = Callable[
+    [
+        np.ndarray,
+        Profile,
+        tuple[int, int, int, int] | None,
+    ],
+    tuple[
+        np.ndarray | None,
+        tuple[int, int, int, int] | None,
+    ],
+]
 
 
 # RDS-200: coordinates in a canonical 493 x 356 crop of the black bezel.
@@ -1918,8 +1931,15 @@ def save_debug_screenshots(
     intervals: Sequence[tuple[float, float, Run]],
     output_dir: Path,
     contrast_mode: str = "auto",
+    display_finder: DisplayFinder | None = None,
 ) -> None:
     """Save one normalized display image from the center of every final interval."""
+    selected_display_finder = (
+        find_display_crop
+        if display_finder is None
+        else display_finder
+    )
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     targets: dict[int, tuple[int, float, float, Run]] = {}
@@ -1951,7 +1971,11 @@ def save_debug_screenshots(
         for frame_index, frame in enumerate(
             iter_ffmpeg_frames(video, info, sample_fps, processing_width)
         ):
-            display, previous_box = find_display_crop(frame, profile, previous_box)
+            display, previous_box = selected_display_finder(
+                frame,
+                profile,
+                previous_box,
+            )
             if display is not None and profile.adaptive_y_shift:
                 effective_contrast = (
                     contrast_mode if profile.name == "rds200" else "none"

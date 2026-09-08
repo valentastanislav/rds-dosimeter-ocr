@@ -1095,8 +1095,6 @@ def save_debug_screenshots_roi(
     contrast_mode: str,
     debug_writer: DebugWriter,
 ) -> None:
-    old_finder = core.find_display_crop
-
     def roi_finder(
         frame: np.ndarray,
         in_profile: core.Profile,
@@ -1112,25 +1110,17 @@ def save_debug_screenshots_roi(
             roi,
         )
 
-    core.find_display_crop = (
-        roi_finder
+    debug_writer(
+        video,
+        info,
+        profile,
+        sample_fps,
+        processing_width,
+        intervals,
+        output_dir,
+        contrast_mode=contrast_mode,
+        display_finder=roi_finder,
     )
-
-    try:
-        debug_writer(
-            video,
-            info,
-            profile,
-            sample_fps,
-            processing_width,
-            intervals,
-            output_dir,
-            contrast_mode=contrast_mode,
-        )
-    finally:
-        core.find_display_crop = (
-            old_finder
-        )
 
 
 # ======================================================================

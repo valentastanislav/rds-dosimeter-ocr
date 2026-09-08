@@ -1462,6 +1462,7 @@ def make_cached_debug_writer(
         ],
         output_dir: Path,
         contrast_mode: str = "auto",
+        display_finder: core.DisplayFinder | None = None,
     ) -> None:
 
         # These are intentionally unused.
@@ -1469,6 +1470,7 @@ def make_cached_debug_writer(
         del info
         del processing_width
         del contrast_mode
+        del display_finder
 
         output_dir.mkdir(
             parents=True,
