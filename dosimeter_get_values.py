@@ -98,6 +98,10 @@ DisplayFinder = Callable[
         tuple[int, int, int, int] | None,
     ],
 ]
+DecimalSequenceObserver = Callable[
+    [Sequence[int]],
+    None,
+]
 
 
 # RDS-200: coordinates in a canonical 493 x 356 crop of the black bezel.
@@ -1536,6 +1540,7 @@ def decode_samples(
     decimal_places_override: int | None = None,
     minimum_confidence: float = 0.0,
     decimal_switch_penalty: float = 4.0,
+    decimal_sequence_observer: DecimalSequenceObserver | None = None,
 ) -> list[DecodedSample]:
     darkness = np.full(
         (len(samples), len(profile.digit_boxes), 7), np.nan, dtype=float
@@ -1663,6 +1668,11 @@ def decode_samples(
         )
     else:
         decimal_places_sequence = [profile.decimal_places] * len(samples)
+
+    if decimal_sequence_observer is not None:
+        decimal_sequence_observer(
+            list(decimal_places_sequence)
+        )
 
     decoded: list[DecodedSample] = []
     for sample, integer_value, confidence, decimal_places in zip(

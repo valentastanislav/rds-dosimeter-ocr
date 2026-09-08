@@ -901,6 +901,9 @@ def make_consensus_decode_samples(
         decimal_places_override=None,
         minimum_confidence=0.0,
         decimal_switch_penalty=4.0,
+        decimal_sequence_observer: (
+            core.DecimalSequenceObserver | None
+        ) = None,
     ):
 
         # Other dosimeter profiles keep their original decoder.
@@ -921,6 +924,9 @@ def make_consensus_decode_samples(
                 ),
                 decimal_switch_penalty=(
                     decimal_switch_penalty
+                ),
+                decimal_sequence_observer=(
+                    decimal_sequence_observer
                 ),
             )
 
@@ -1217,6 +1223,17 @@ def make_consensus_decode_samples(
                 profile.decimal_places
             ] * len(
                 samples
+            )
+
+        if (
+            decimal_sequence_observer
+            is not None
+        ):
+
+            decimal_sequence_observer(
+                list(
+                    decimal_places_sequence
+                )
             )
 
         decoded = []

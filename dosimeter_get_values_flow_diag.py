@@ -109,6 +109,9 @@ def capturing_decode_samples(
     decimal_places_override=None,
     minimum_confidence=0.0,
     decimal_switch_penalty=4.0,
+    decimal_sequence_observer: (
+        core.DecimalSequenceObserver | None
+    ) = None,
 ):
 
     raw = (
@@ -155,6 +158,9 @@ def capturing_decode_samples(
         ),
         decimal_switch_penalty=(
             decimal_switch_penalty
+        ),
+        decimal_sequence_observer=(
+            decimal_sequence_observer
         ),
     )
 

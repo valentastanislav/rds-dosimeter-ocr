@@ -1955,38 +1955,48 @@ def main(
             int
         ] = []
 
-        original_decimal_decoder = (
-            core.decode_decimal_places_sequence
-        )
-
-        def capturing_decimal_decoder(
-            decimal_scores,
-            integer_values,
-            in_profile,
-            switch_penalty,
-        ):
-
-            result = (
-                original_decimal_decoder(
-                    decimal_scores,
-                    integer_values,
-                    in_profile,
-                    switch_penalty,
-                )
-            )
-
+        def capture_decimal_sequence(
+            decimal_places_sequence: Sequence[int],
+        ) -> None:
             captured_decimal_sequence.clear()
 
             captured_decimal_sequence.extend(
                 int(value)
-                for value in result
+                for value in decimal_places_sequence
             )
 
-            return result
-
-        core.decode_decimal_places_sequence = (
-            capturing_decimal_decoder
+        selected_decode_samples = (
+            core.decode_samples
+            if decode_samples is None
+            else decode_samples
         )
+
+        def decode_samples_with_decimal_observer(
+            samples,
+            in_profile,
+            filter_window,
+            decimal_places_override=None,
+            minimum_confidence=0.0,
+            decimal_switch_penalty=4.0,
+        ):
+
+            return selected_decode_samples(
+                samples,
+                in_profile,
+                filter_window,
+                decimal_places_override=(
+                    decimal_places_override
+                ),
+                minimum_confidence=(
+                    minimum_confidence
+                ),
+                decimal_switch_penalty=(
+                    decimal_switch_penalty
+                ),
+                decimal_sequence_observer=(
+                    capture_decimal_sequence
+                ),
+            )
 
         decimal_override = (
             None
@@ -2145,7 +2155,7 @@ def main(
                 fixed_app.main(
                     remaining,
                     decode_samples=(
-                        decode_samples
+                        decode_samples_with_decimal_observer
                     ),
                     base_profile_override=(
                         profile
@@ -2159,10 +2169,6 @@ def main(
         finally:
             fixed_app.make_rectified_finder = (
                 original_factory
-            )
-
-            core.decode_decimal_places_sequence = (
-                original_decimal_decoder
             )
 
         # ------------------------------------------------------
