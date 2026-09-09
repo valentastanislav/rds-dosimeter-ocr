@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Callable, Sequence
 
 import cv2
@@ -86,19 +86,6 @@ RectifiedFinderFactory = Callable[
     roi_app.RoiDisplayFinder,
 ]
 
-
-@dataclass(frozen=True)
-class LocalSegmentMeasurementConfig:
-    segment_percentile: float
-    background_percentile: float
-
-
-RDS200_LOCAL_SEGMENT_MEASUREMENT = (
-    LocalSegmentMeasurementConfig(
-        segment_percentile=35.0,
-        background_percentile=70.0,
-    )
-)
 
 ORIGINAL_EXTRACT_DARKNESS = (
     core.extract_darkness
@@ -562,7 +549,7 @@ def make_local_masks(
 def local_darkness(
     patches,
     profile: core.Profile,
-    config: LocalSegmentMeasurementConfig,
+    config: core.FixedGridMeasurementConfig,
 ) -> np.ndarray:
     segment_masks, rings = (
         make_local_masks(
@@ -637,7 +624,7 @@ def local_darkness(
 
 
 # ======================================================================
-# Fixed RDS-200 extraction
+# Fixed-grid extraction
 # ======================================================================
 
 
@@ -648,18 +635,30 @@ def fixed_extract_darkness(
     segment_percentile: float = 50.0,
     *,
     contrast_mode: str,
-    measurement_config: LocalSegmentMeasurementConfig,
+    measurement_config: core.FixedGridMeasurementConfig,
 ) -> np.ndarray:
     del segment_masks
     del segment_percentile
 
-    if profile.name != "rds200":
+    if measurement_config.mode == "core":
         return ORIGINAL_EXTRACT_DARKNESS(
             display,
             profile,
             core.make_segment_masks(
                 profile
             ),
+            segment_percentile=(
+                measurement_config.segment_percentile
+            ),
+            background_percentile=(
+                measurement_config.background_percentile
+            ),
+        )
+
+    if measurement_config.mode != "local":
+        raise ValueError(
+            "Unknown fixed-grid measurement mode: "
+            f"{measurement_config.mode}"
         )
 
     raw_patches = (
@@ -728,7 +727,7 @@ def fixed_extract_darkness(
 
 def make_fixed_extract_darkness(
     contrast_mode: str,
-    measurement_config: LocalSegmentMeasurementConfig,
+    measurement_config: core.FixedGridMeasurementConfig,
 ):
     def configured_fixed_extract_darkness(
         display: np.ndarray,
@@ -1030,7 +1029,7 @@ def main(
         darkness_extractor = (
             make_fixed_extract_darkness(
                 args.contrast,
-                RDS200_LOCAL_SEGMENT_MEASUREMENT,
+                fixed_profile.fixedgrid_primary_measurement,
             )
         )
 

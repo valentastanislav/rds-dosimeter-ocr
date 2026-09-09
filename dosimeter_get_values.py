@@ -56,6 +56,13 @@ RDS30_DIGIT_PATTERNS[9] = (1, 1, 1, 0, 0, 1, 1)
 
 
 @dataclass(frozen=True)
+class FixedGridMeasurementConfig:
+    mode: str
+    segment_percentile: float
+    background_percentile: float
+
+
+@dataclass(frozen=True)
 class Profile:
     name: str
     canonical_width: int
@@ -66,6 +73,7 @@ class Profile:
     display_aspect_min: float
     display_aspect_max: float
     flow_feature_exclusion_box: tuple[float, float, float, float]
+    fixedgrid_primary_measurement: FixedGridMeasurementConfig
     # Candidate decimal-point boxes: (x1, y1, x2, y2, decimal_places).
     # If empty, decimal_places above is used as a fixed value.
     decimal_candidates: tuple[tuple[int, int, int, int, int], ...] = ()
@@ -131,6 +139,11 @@ RDS200 = Profile(
     display_aspect_min=1.20,
     display_aspect_max=1.60,
     flow_feature_exclusion_box=(0.23, 0.40, 0.78, 0.86),
+    fixedgrid_primary_measurement=FixedGridMeasurementConfig(
+        mode="local",
+        segment_percentile=35.0,
+        background_percentile=70.0,
+    ),
     # The RDS-200 moves the decimal point with the measurement range:
     # x.xxx is rendered as X.XX (2 decimal places), while xx.x is XX.X.
     decimal_candidates=(
@@ -231,6 +244,11 @@ RDS30 = Profile(
     display_aspect_min=1.20,
     display_aspect_max=1.60,
     flow_feature_exclusion_box=(0.33, 0.34, 0.98, 0.80),
+    fixedgrid_primary_measurement=FixedGridMeasurementConfig(
+        mode="core",
+        segment_percentile=50.0,
+        background_percentile=90.0,
+    ),
     default_sample_fps=30.0,
     default_filter_window=5,
     temporal_filter="median",
@@ -966,10 +984,16 @@ def extract_darkness_from_patches(
     patches: Sequence[np.ndarray],
     segment_masks: Sequence[np.ndarray],
     segment_percentile: float = 50.0,
+    background_percentile: float = 90.0,
 ) -> np.ndarray:
     result = np.empty((len(patches), 7), dtype=float)
     for digit_index, patch in enumerate(patches):
-        background = float(np.percentile(patch, 90))
+        background = float(
+            np.percentile(
+                patch,
+                background_percentile,
+            )
+        )
         for segment_index, mask in enumerate(segment_masks):
             segment_level = float(
                 np.percentile(patch[mask], segment_percentile)
@@ -993,11 +1017,13 @@ def extract_darkness(
     profile: Profile,
     segment_masks: Sequence[np.ndarray],
     segment_percentile: float = 50.0,
+    background_percentile: float = 90.0,
 ) -> np.ndarray:
     return extract_darkness_from_patches(
         digit_patches(display, profile),
         segment_masks,
         segment_percentile=segment_percentile,
+        background_percentile=background_percentile,
     )
 
 
