@@ -65,6 +65,7 @@ class Profile:
     decimal_places: int
     display_aspect_min: float
     display_aspect_max: float
+    flow_feature_exclusion_box: tuple[float, float, float, float]
     # Candidate decimal-point boxes: (x1, y1, x2, y2, decimal_places).
     # If empty, decimal_places above is used as a fixed value.
     decimal_candidates: tuple[tuple[int, int, int, int, int], ...] = ()
@@ -129,6 +130,7 @@ RDS200 = Profile(
     decimal_places=1,
     display_aspect_min=1.20,
     display_aspect_max=1.60,
+    flow_feature_exclusion_box=(0.23, 0.40, 0.78, 0.86),
     # The RDS-200 moves the decimal point with the measurement range:
     # x.xxx is rendered as X.XX (2 decimal places), while xx.x is XX.X.
     decimal_candidates=(
@@ -228,6 +230,7 @@ RDS30 = Profile(
     decimal_places=2,
     display_aspect_min=1.20,
     display_aspect_max=1.60,
+    flow_feature_exclusion_box=(0.33, 0.34, 0.98, 0.80),
     default_sample_fps=30.0,
     default_filter_window=5,
     temporal_filter="median",

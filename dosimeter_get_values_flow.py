@@ -280,6 +280,7 @@ def decompose_similarity(
 def make_feature_mask(
     frame_shape: tuple[int, ...],
     box: tuple[int, int, int, int],
+    profile: core.Profile,
 ) -> np.ndarray:
     """
     Track static features on and around the display.
@@ -353,28 +354,35 @@ def make_feature_mask(
         -1,
     )
 
-    # Exclude most of the changing numeric field.
+    # Exclude the profile-specific changing numeric field.
+    (
+        exclusion_x1,
+        exclusion_y1,
+        exclusion_x2,
+        exclusion_y2,
+    ) = profile.flow_feature_exclusion_box
+
     inner_x1 = int(
         round(
-            x + 0.23 * width
+            x + exclusion_x1 * width
         )
     )
 
     inner_x2 = int(
         round(
-            x + 0.78 * width
+            x + exclusion_x2 * width
         )
     )
 
     inner_y1 = int(
         round(
-            y + 0.40 * height
+            y + exclusion_y1 * height
         )
     )
 
     inner_y2 = int(
         round(
-            y + 0.86 * height
+            y + exclusion_y2 * height
         )
     )
 
@@ -881,6 +889,7 @@ def precompute_motion(
         make_feature_mask(
             reference_gray.shape,
             reference_box,
+            profile,
         )
     )
 
