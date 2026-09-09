@@ -41,7 +41,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass, replace
-from typing import Sequence
+from typing import Callable, Sequence
 
 import cv2
 import numpy as np
@@ -80,6 +80,10 @@ Grid = tuple[
     float,
     float,
     float,
+]
+RectifiedFinderFactory = Callable[
+    [np.ndarray],
+    roi_app.RoiDisplayFinder,
 ]
 
 
@@ -799,6 +803,7 @@ def main(
     decode_samples: roi_app.DecodeSamples | None = None,
     base_profile_override: core.Profile | None = None,
     debug_writer: roi_app.DebugWriter | None = None,
+    rectified_finder_factory: RectifiedFinderFactory | None = None,
 ) -> int:
     extra, remaining = (
         parse_extra_args(argv)
@@ -1016,8 +1021,10 @@ def main(
         # Configure fixed profile and fixed extraction
         # ==========================================================
 
-        original_finder = (
-            roi_app.find_display_crop_roi
+        selected_rectified_finder_factory = (
+            make_rectified_finder
+            if rectified_finder_factory is None
+            else rectified_finder_factory
         )
 
         darkness_extractor = (
@@ -1027,8 +1034,8 @@ def main(
             )
         )
 
-        roi_app.find_display_crop_roi = (
-            make_rectified_finder(
+        display_finder = (
+            selected_rectified_finder_factory(
                 extra.quad
             )
         )
@@ -1037,29 +1044,26 @@ def main(
         # Run normal ROI pipeline
         # ==========================================================
 
-        try:
-            result = (
-                roi_app.main(
-                    remaining,
-                    darkness_extractor=(
-                        darkness_extractor
-                    ),
-                    profile_override=(
-                        fixed_profile
-                    ),
-                    decode_samples=(
-                        decode_samples
-                    ),
-                    debug_writer=(
-                        debug_writer
-                    ),
-                )
+        result = (
+            roi_app.main(
+                remaining,
+                darkness_extractor=(
+                    darkness_extractor
+                ),
+                profile_override=(
+                    fixed_profile
+                ),
+                decode_samples=(
+                    decode_samples
+                ),
+                debug_writer=(
+                    debug_writer
+                ),
+                display_finder=(
+                    display_finder
+                ),
             )
-
-        finally:
-            roi_app.find_display_crop_roi = (
-                original_finder
-            )
+        )
 
         print()
 

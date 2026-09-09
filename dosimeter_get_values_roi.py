@@ -73,6 +73,18 @@ DecodeSamples = Callable[
     list[core.DecodedSample],
 ]
 DebugWriter = Callable[..., None]
+RoiDisplayFinder = Callable[
+    [
+        np.ndarray,
+        core.Profile,
+        Box | None,
+        ROI | None,
+    ],
+    tuple[
+        np.ndarray | None,
+        Box | None,
+    ],
+]
 
 
 # Keep the original detector.  With no ROI, the new script can therefore
@@ -1094,6 +1106,7 @@ def save_debug_screenshots_roi(
     roi: ROI | None,
     contrast_mode: str,
     debug_writer: DebugWriter,
+    display_finder: RoiDisplayFinder,
 ) -> None:
     def roi_finder(
         frame: np.ndarray,
@@ -1103,7 +1116,7 @@ def save_debug_screenshots_roi(
         np.ndarray | None,
         Box | None,
     ]:
-        return find_display_crop_roi(
+        return display_finder(
             frame,
             in_profile,
             previous_box,
@@ -1444,6 +1457,7 @@ def main(
     profile_override: core.Profile | None = None,
     decode_samples: DecodeSamples | None = None,
     debug_writer: DebugWriter | None = None,
+    display_finder: RoiDisplayFinder | None = None,
 ) -> int:
     args = parse_args(argv)
 
@@ -1463,6 +1477,12 @@ def main(
         core.save_debug_screenshots
         if debug_writer is None
         else debug_writer
+    )
+
+    selected_display_finder = (
+        find_display_crop_roi
+        if display_finder is None
+        else display_finder
     )
 
     try:
@@ -1603,7 +1623,7 @@ def main(
             (
                 display,
                 new_box,
-            ) = find_display_crop_roi(
+            ) = selected_display_finder(
                 frame,
                 profile,
                 previous_box,
@@ -1919,6 +1939,7 @@ def main(
                 roi,
                 args.contrast,
                 selected_debug_writer,
+                selected_display_finder,
             )
 
         summary_path = (

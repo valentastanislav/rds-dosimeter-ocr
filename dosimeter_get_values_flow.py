@@ -2008,12 +2008,8 @@ def main(
         )
 
         # ------------------------------------------------------
-        # Replace fixedgrid's display finder
+        # Build the flow-aware display finder factory
         # ----------------------------------------------------------
-
-        original_factory = (
-            fixed_app.make_rectified_finder
-        )
 
         frame_index = -1
 
@@ -2127,10 +2123,6 @@ def main(
 
             return finder
 
-        fixed_app.make_rectified_finder = (
-            make_flow_finder
-        )
-
         # ------------------------------------------------------
         # Construct cached debug writer.
         #
@@ -2150,26 +2142,23 @@ def main(
         # Run existing fixed-grid decoder
         # ----------------------------------------------------------
 
-        try:
-            result = (
-                fixed_app.main(
-                    remaining,
-                    decode_samples=(
-                        decode_samples_with_decimal_observer
-                    ),
-                    base_profile_override=(
-                        profile
-                    ),
-                    debug_writer=(
-                        cached_debug_writer
-                    ),
-                )
+        result = (
+            fixed_app.main(
+                remaining,
+                decode_samples=(
+                    decode_samples_with_decimal_observer
+                ),
+                base_profile_override=(
+                    profile
+                ),
+                debug_writer=(
+                    cached_debug_writer
+                ),
+                rectified_finder_factory=(
+                    make_flow_finder
+                ),
             )
-
-        finally:
-            fixed_app.make_rectified_finder = (
-                original_factory
-            )
+        )
 
         # ------------------------------------------------------
         # Diagnostics
