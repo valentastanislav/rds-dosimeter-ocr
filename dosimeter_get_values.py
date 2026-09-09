@@ -27,7 +27,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Iterable, Literal, Sequence
 
 import cv2
 import numpy as np
@@ -62,6 +62,12 @@ class FixedGridMeasurementConfig:
     background_percentile: float
 
 
+FixedGridGeometryMode = Literal[
+    "manual_grid",
+    "profile",
+]
+
+
 @dataclass(frozen=True)
 class Profile:
     name: str
@@ -74,6 +80,7 @@ class Profile:
     display_aspect_max: float
     flow_feature_exclusion_box: tuple[float, float, float, float]
     fixedgrid_primary_measurement: FixedGridMeasurementConfig
+    fixedgrid_geometry_mode: FixedGridGeometryMode
     # Candidate decimal-point boxes: (x1, y1, x2, y2, decimal_places).
     # If empty, decimal_places above is used as a fixed value.
     decimal_candidates: tuple[tuple[int, int, int, int, int], ...] = ()
@@ -144,6 +151,7 @@ RDS200 = Profile(
         segment_percentile=35.0,
         background_percentile=70.0,
     ),
+    fixedgrid_geometry_mode="manual_grid",
     # The RDS-200 moves the decimal point with the measurement range:
     # x.xxx is rendered as X.XX (2 decimal places), while xx.x is XX.X.
     decimal_candidates=(
@@ -234,10 +242,10 @@ RDS30 = Profile(
     canonical_width=493,
     canonical_height=356,
     digit_boxes=(
-        (178, 135, 245, 265),
-        (248, 135, 315, 265),
-        (318, 135, 388, 265),
-        (389, 135, 469, 265),
+        (5, 6, 116, 350),
+        (121, 6, 232, 350),
+        (237, 6, 354, 350),
+        (355, 6, 488, 350),
     ),
     segment_polygons=RDS30_SEGMENTS,
     decimal_places=2,
@@ -249,6 +257,7 @@ RDS30 = Profile(
         segment_percentile=50.0,
         background_percentile=90.0,
     ),
+    fixedgrid_geometry_mode="profile",
     default_sample_fps=30.0,
     default_filter_window=5,
     temporal_filter="median",

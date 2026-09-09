@@ -8,11 +8,9 @@ Uses:
     dosimeter_get_values_rectified.py
 
 The display is first perspective-rectified using the already determined
---quad.  The user then selects ONE fixed rectangle containing all numeric
-LCD positions configured by the selected profile.
-
-That rectangle is used to derive the digit geometry for the entire video.
-There is no frame-by-frame y-shift or geometry optimizer.
+--quad.  Digit geometry then comes from the selected Profile policy: either
+one manually selected fixed rectangle, or the Profile's canonical digit
+boxes.  There is no frame-by-frame y-shift or geometry optimizer.
 
 Additionally, each seven-segment bar is measured against its LOCAL
 surrounding LCD background rather than against one brightness value
@@ -195,6 +193,49 @@ def parse_roi_args(
 ) -> argparse.Namespace:
     return roi_app.parse_args(
         remaining
+    )
+
+
+# ======================================================================
+# Profile-driven fixed-grid geometry policy
+# ======================================================================
+
+
+def validate_geometry_options(
+    profile: core.Profile,
+    select_grid: bool,
+    grid: Grid | None,
+) -> None:
+    mode = (
+        profile.fixedgrid_geometry_mode
+    )
+
+    if mode == "manual_grid":
+        if select_grid and grid is not None:
+            raise ValueError(
+                "Use either --select-grid or --grid."
+            )
+
+        if not select_grid and grid is None:
+            raise ValueError(
+                "First run requires --select-grid; "
+                "later runs may use --grid."
+            )
+
+        return
+
+    if mode == "profile":
+        if select_grid or grid is not None:
+            raise ValueError(
+                f"Profile {profile.name} uses canonical digit geometry; "
+                "do not use --select-grid or --grid."
+            )
+
+        return
+
+    raise ValueError(
+        "Unknown fixed-grid geometry mode: "
+        f"{mode}"
     )
 
 
@@ -466,6 +507,20 @@ def make_fixed_profile(
         # CRITICAL:
         # perspective + manually selected grid define geometry.
         # No per-frame shift anymore.
+        adaptive_y_shift=False,
+        y_shift_min=0,
+        y_shift_max=0,
+    )
+
+
+def make_profile_geometry_fixed_profile(
+    profile: core.Profile,
+) -> core.Profile:
+    return replace(
+        profile,
+
+        # Perspective rectification plus canonical Profile digit boxes
+        # define the fixed geometry. No per-frame shift is used.
         adaptive_y_shift=False,
         y_shift_min=0,
         y_shift_max=0,
@@ -824,40 +879,23 @@ def main(
 
         return 1
 
-    if (
-        extra.select_grid
-        and extra.grid is not None
-    ):
-        print(
-            "Error: use either --select-grid or --grid.",
-            file=sys.stderr,
-        )
-
-        return 1
-
-    if (
-        not extra.select_grid
-        and extra.grid is None
-    ):
-        print(
-            "Error: first run requires --select-grid; "
-            "later runs may use --grid.",
-            file=sys.stderr,
-        )
-
-        return 1
-
     try:
-        info = core.probe_video(
-            args.video
-        )
-
         base_profile = (
             core.PROFILES[
                 args.profile
             ]
             if base_profile_override is None
             else base_profile_override
+        )
+
+        validate_geometry_options(
+            base_profile,
+            extra.select_grid,
+            extra.grid,
+        )
+
+        info = core.probe_video(
+            args.video
         )
 
         sample_fps = (
@@ -972,17 +1010,28 @@ def main(
                 file=sys.stderr,
             )
 
-        if grid is None:
-            raise RuntimeError(
-                "No fixed digit grid available."
+        if (
+            base_profile.fixedgrid_geometry_mode
+            == "manual_grid"
+        ):
+            if grid is None:
+                raise RuntimeError(
+                    "No fixed digit grid available."
+                )
+
+            fixed_profile = (
+                make_fixed_profile(
+                    base_profile,
+                    grid,
+                )
             )
 
-        fixed_profile = (
-            make_fixed_profile(
-                base_profile,
-                grid,
+        else:
+            fixed_profile = (
+                make_profile_geometry_fixed_profile(
+                    base_profile
+                )
             )
-        )
 
         print(
             "Fixed digit boxes:",
@@ -1064,20 +1113,21 @@ def main(
             )
         )
 
-        print()
+        if grid is not None:
+            print()
 
-        print(
-            "Fixed digit grid used:"
-        )
+            print(
+                "Fixed digit grid used:"
+            )
 
-        print(
-            (
-                "  --grid "
-                + format_grid(
-                    grid
+            print(
+                (
+                    "  --grid "
+                    + format_grid(
+                        grid
+                    )
                 )
             )
-        )
 
         print()
 

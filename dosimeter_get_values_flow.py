@@ -2079,29 +2079,6 @@ def main(
 
         return 1
 
-    if (
-        fixed_extra.select_grid
-        and fixed_extra.grid is not None
-    ):
-        print(
-            "Error: use either --select-grid or --grid.",
-            file=sys.stderr,
-        )
-
-        return 1
-
-    if (
-        not fixed_extra.select_grid
-        and fixed_extra.grid is None
-    ):
-        print(
-            "Error: first run requires --select-grid; "
-            "later runs may use --grid.",
-            file=sys.stderr,
-        )
-
-        return 1
-
     args = (
         fixed_app.parse_roi_args(
             roi_remaining
@@ -2128,6 +2105,12 @@ def main(
             ]
             if profile_override is None
             else profile_override
+        )
+
+        fixed_app.validate_geometry_options(
+            profile,
+            fixed_extra.select_grid,
+            fixed_extra.grid,
         )
 
         info = (
@@ -2337,7 +2320,11 @@ def main(
                     "No perspective quad is available."
                 )
 
-            if resolved_grid is None:
+            if (
+                profile.fixedgrid_geometry_mode
+                == "manual_grid"
+                and resolved_grid is None
+            ):
                 raise RuntimeError(
                     "No fixed digit grid is available."
                 )
@@ -2348,11 +2335,17 @@ def main(
                 rect_app.format_quad(
                     resolved_quad
                 ),
-                "--grid",
-                fixed_app.format_grid(
-                    resolved_grid
-                ),
             ]
+
+            if resolved_grid is not None:
+                fixedgrid_argv.extend(
+                    [
+                        "--grid",
+                        fixed_app.format_grid(
+                            resolved_grid
+                        ),
+                    ]
+                )
 
         (
             frame_width,
