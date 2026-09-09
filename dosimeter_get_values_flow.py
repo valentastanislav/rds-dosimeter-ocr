@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Optical-flow stabilization for hand-held RDS-200 video.
+Optical-flow stabilization for hand-held RADOS dosimeter video.
 
 Required files in the same directory:
 
@@ -12,7 +12,7 @@ Required files in the same directory:
 Processing:
 
     video
-      -> establish one reference display box
+      -> establish one automatic or manual reference display box
       -> sequential Lucas-Kanade optical flow
       -> RANSAC similarity transform
       -> stabilize complete processing frame
@@ -62,7 +62,7 @@ import csv
 import math
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 import cv2
 import numpy as np
@@ -110,6 +110,114 @@ BASE_ROI_FINDER = (
     roi_app.find_display_crop_roi
 )
 
+ReferenceBox = tuple[
+    float,
+    float,
+    float,
+    float,
+]
+ReferenceBoxSelector = Callable[
+    [np.ndarray],
+    ReferenceBox,
+]
+
+
+# ======================================================================
+# Manual reference-display box
+# ======================================================================
+
+
+def parse_reference_box(
+    text: str,
+) -> ReferenceBox:
+    try:
+        values = tuple(
+            float(value.strip())
+            for value in text.split(",")
+        )
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "--reference-box must contain four numbers: x1,y1,x2,y2"
+        ) from exc
+
+    if len(values) != 4:
+        raise argparse.ArgumentTypeError(
+            "--reference-box must contain four numbers: x1,y1,x2,y2"
+        )
+
+    x1, y1, x2, y2 = values
+
+    if not (
+        0.0 <= x1 < x2 <= 1.0
+        and 0.0 <= y1 < y2 <= 1.0
+    ):
+        raise argparse.ArgumentTypeError(
+            "--reference-box coordinates must satisfy "
+            "0 <= x1 < x2 <= 1 and 0 <= y1 < y2 <= 1"
+        )
+
+    return values
+
+
+def format_reference_box(
+    box: ReferenceBox,
+) -> str:
+    return ",".join(
+        f"{value:.6f}"
+        for value in box
+    )
+
+
+def select_reference_box(
+    frame: np.ndarray,
+) -> ReferenceBox:
+    height, width = frame.shape[:2]
+
+    window_name = (
+        "Select COMPLETE physical LCD/display region - "
+        "ENTER/SPACE accept, ESC cancel"
+    )
+
+    try:
+        cv2.namedWindow(
+            window_name,
+            cv2.WINDOW_NORMAL,
+        )
+
+        x, y, box_width, box_height = cv2.selectROI(
+            window_name,
+            frame,
+            showCrosshair=True,
+            fromCenter=False,
+        )
+
+        cv2.destroyWindow(
+            window_name
+        )
+
+    except cv2.error as exc:
+        try:
+            cv2.destroyAllWindows()
+        except cv2.error:
+            pass
+
+        raise RuntimeError(
+            "OpenCV could not open the reference-box selection window. "
+            "Use --reference-box x1,y1,x2,y2 instead."
+        ) from exc
+
+    if box_width <= 0 or box_height <= 0:
+        raise RuntimeError(
+            "Reference-box selection was cancelled."
+        )
+
+    return (
+        x / width,
+        y / height,
+        (x + box_width) / width,
+        (y + box_height) / height,
+    )
+
 
 # ======================================================================
 # Extra command-line options
@@ -132,6 +240,34 @@ def parse_wrapper_args(
         help=(
             "reference time; normally use the time at which "
             "the fixed digit grid was selected"
+        ),
+    )
+
+    parser.add_argument(
+        "--reference-box",
+        type=parse_reference_box,
+        default=None,
+        help=(
+            "complete physical display region at --track-time, "
+            "as normalized oriented-frame x1,y1,x2,y2"
+        ),
+    )
+
+    parser.add_argument(
+        "--select-reference-box",
+        action="store_true",
+        help=(
+            "interactively select the complete display region "
+            "on the --track-time frame"
+        ),
+    )
+
+    parser.add_argument(
+        "--select-quad",
+        action="store_true",
+        help=(
+            "select the perspective quad inside the manual "
+            "reference display crop"
         ),
     )
 
@@ -774,6 +910,8 @@ def precompute_motion(
     maximum_scale: float,
     minimum_inliers: int,
     redetect_every: int,
+    manual_reference_box: ReferenceBox | None = None,
+    reference_box_selector: ReferenceBoxSelector | None = None,
 ) -> tuple[
     list[np.ndarray],
     tuple[int, int, int, int],
@@ -796,6 +934,11 @@ def precompute_motion(
     actual_reference_index = None
 
     previous_box = None
+
+    manual_reference = (
+        manual_reference_box is not None
+        or reference_box_selector is not None
+    )
 
     print(
         "Pre-reading sampled frames and locating reference display...",
@@ -820,10 +963,37 @@ def precompute_motion(
             gray
         )
 
-        # Use the normal detector only while establishing
-        # the physical reference display box.
         if (
-            actual_reference_index is None
+            manual_reference
+            and index == requested_reference_index
+        ):
+            selected_reference_box = (
+                reference_box_selector(
+                    frame
+                )
+                if reference_box_selector is not None
+                else manual_reference_box
+            )
+
+            if selected_reference_box is None:
+                raise RuntimeError(
+                    "No manual reference display box was supplied."
+                )
+
+            reference_box = (
+                roi_app.roi_to_pixels(
+                    selected_reference_box,
+                    gray.shape[1],
+                    gray.shape[0],
+                )
+            )
+
+            actual_reference_index = index
+
+        # Preserve automatic acquisition when no manual box is used.
+        elif (
+            not manual_reference
+            and actual_reference_index is None
             and index
             <= requested_reference_index + 10
         ):
@@ -1858,14 +2028,79 @@ def main(
     # Parse normal fixed-grid / ROI arguments
     # ----------------------------------------------------------
 
+    if (
+        wrapper_args.select_reference_box
+        and wrapper_args.reference_box is not None
+    ):
+        print(
+            "Error: use either --select-reference-box or --reference-box.",
+            file=sys.stderr,
+        )
+
+        return 1
+
+    manual_reference_requested = (
+        wrapper_args.select_reference_box
+        or wrapper_args.reference_box is not None
+    )
+
+    if (
+        wrapper_args.select_quad
+        and not manual_reference_requested
+    ):
+        print(
+            "Error: --select-quad requires --select-reference-box "
+            "or --reference-box.",
+            file=sys.stderr,
+        )
+
+        return 1
+
     (
         fixed_extra,
         roi_remaining,
     ) = (
         fixed_app.parse_extra_args(
-            remaining
+            remaining,
+            require_quad=(
+                not wrapper_args.select_quad
+            ),
         )
     )
+
+    if (
+        wrapper_args.select_quad
+        and fixed_extra.quad is not None
+    ):
+        print(
+            "Error: use either --select-quad or --quad.",
+            file=sys.stderr,
+        )
+
+        return 1
+
+    if (
+        fixed_extra.select_grid
+        and fixed_extra.grid is not None
+    ):
+        print(
+            "Error: use either --select-grid or --grid.",
+            file=sys.stderr,
+        )
+
+        return 1
+
+    if (
+        not fixed_extra.select_grid
+        and fixed_extra.grid is None
+    ):
+        print(
+            "Error: first run requires --select-grid; "
+            "later runs may use --grid.",
+            file=sys.stderr,
+        )
+
+        return 1
 
     args = (
         fixed_app.parse_roi_args(
@@ -1873,7 +2108,10 @@ def main(
         )
     )
 
-    if args.roi is None:
+    if (
+        args.roi is None
+        and not manual_reference_requested
+    ):
 
         print(
             "Error: --roi is required.",
@@ -1913,6 +2151,148 @@ def main(
             ),
         )
 
+        resolved_reference_box = (
+            wrapper_args.reference_box
+        )
+
+        resolved_quad = (
+            fixed_extra.quad
+        )
+
+        resolved_grid = (
+            fixed_extra.grid
+        )
+
+        manual_geometry_selection = (
+            wrapper_args.select_reference_box
+            or wrapper_args.select_quad
+            or (
+                manual_reference_requested
+                and fixed_extra.select_grid
+            )
+        )
+
+        def initialize_manual_reference(
+            frame: np.ndarray,
+        ) -> ReferenceBox:
+            nonlocal resolved_reference_box
+            nonlocal resolved_quad
+            nonlocal resolved_grid
+
+            if wrapper_args.select_reference_box:
+                resolved_reference_box = (
+                    select_reference_box(
+                        frame
+                    )
+                )
+
+            if resolved_reference_box is None:
+                raise RuntimeError(
+                    "No manual reference display box is available."
+                )
+
+            print(
+                "Selected reference display box:",
+                file=sys.stderr,
+            )
+
+            print(
+                (
+                    "  --reference-box "
+                    + format_reference_box(
+                        resolved_reference_box
+                    )
+                ),
+                file=sys.stderr,
+            )
+
+            if (
+                not wrapper_args.select_quad
+                and not fixed_extra.select_grid
+            ):
+                return resolved_reference_box
+
+            reference_box_pixels = (
+                roi_app.roi_to_pixels(
+                    resolved_reference_box,
+                    frame.shape[1],
+                    frame.shape[0],
+                )
+            )
+
+            reference_display = (
+                crop_reference_display(
+                    frame,
+                    reference_box_pixels,
+                    profile,
+                )
+            )
+
+            if reference_display is None:
+                raise RuntimeError(
+                    "The manual reference display box produced an empty crop."
+                )
+
+            if wrapper_args.select_quad:
+                resolved_quad = (
+                    rect_app.select_quad(
+                        reference_display
+                    )
+                )
+
+                print(
+                    "Selected perspective quad:",
+                    file=sys.stderr,
+                )
+
+                print(
+                    (
+                        "  --quad "
+                        + rect_app.format_quad(
+                            resolved_quad
+                        )
+                    ),
+                    file=sys.stderr,
+                )
+
+            if resolved_quad is None:
+                raise RuntimeError(
+                    "No perspective quad is available for grid selection."
+                )
+
+            if fixed_extra.select_grid:
+                reference_rectified = (
+                    rect_app.rectify_display(
+                        reference_display,
+                        profile,
+                        resolved_quad,
+                    )
+                )
+
+                resolved_grid = (
+                    fixed_app.select_digit_grid(
+                        reference_rectified,
+                        profile,
+                    )
+                )
+
+                print(
+                    "Selected fixed digit grid:",
+                    file=sys.stderr,
+                )
+
+                print(
+                    (
+                        "  --grid "
+                        + fixed_app.format_grid(
+                            resolved_grid
+                        )
+                    ),
+                    file=sys.stderr,
+                )
+
+            return resolved_reference_box
+
         # ------------------------------------------------------
         # Precompute optical-flow geometry
         # ----------------------------------------------------------
@@ -1936,7 +2316,43 @@ def main(
             wrapper_args.flow_max_scale,
             wrapper_args.flow_min_inliers,
             wrapper_args.flow_redetect_every,
+            manual_reference_box=(
+                resolved_reference_box
+                if manual_reference_requested
+                and not manual_geometry_selection
+                else None
+            ),
+            reference_box_selector=(
+                initialize_manual_reference
+                if manual_geometry_selection
+                else None
+            ),
         )
+
+        fixedgrid_argv = remaining
+
+        if manual_geometry_selection:
+            if resolved_quad is None:
+                raise RuntimeError(
+                    "No perspective quad is available."
+                )
+
+            if resolved_grid is None:
+                raise RuntimeError(
+                    "No fixed digit grid is available."
+                )
+
+            fixedgrid_argv = [
+                *roi_remaining,
+                "--quad",
+                rect_app.format_quad(
+                    resolved_quad
+                ),
+                "--grid",
+                fixed_app.format_grid(
+                    resolved_grid
+                ),
+            ]
 
         (
             frame_width,
@@ -2153,7 +2569,7 @@ def main(
 
         result = (
             fixed_app.main(
-                remaining,
+                fixedgrid_argv,
                 decode_samples=(
                     decode_samples_with_decimal_observer
                 ),

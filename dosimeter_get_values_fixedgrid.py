@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fixed-grid RDS-200 decoder.
+Fixed-grid RADOS dosimeter decoder.
 
 Uses:
     dosimeter_get_values.py
@@ -8,8 +8,8 @@ Uses:
     dosimeter_get_values_rectified.py
 
 The display is first perspective-rectified using the already determined
---quad.  The user then selects ONE fixed rectangle containing all three
-large numeric LCD digits.
+--quad.  The user then selects ONE fixed rectangle containing all numeric
+LCD positions configured by the selected profile.
 
 That rectangle is used to derive the digit geometry for the entire video.
 There is no frame-by-frame y-shift or geometry optimizer.
@@ -91,10 +91,6 @@ ORIGINAL_EXTRACT_DARKNESS = (
     core.extract_darkness
 )
 
-ORIGINAL_RDS200_PROFILE = (
-    core.PROFILES["rds200"]
-)
-
 ORIGINAL_ROI_FINDER = (
     roi_app.find_display_crop_roi
 )
@@ -159,6 +155,7 @@ def format_grid(
 
 def parse_extra_args(
     argv: Sequence[str] | None = None,
+    require_quad: bool = True,
 ) -> tuple[
     argparse.Namespace,
     list[str],
@@ -170,7 +167,7 @@ def parse_extra_args(
     parser.add_argument(
         "--quad",
         type=rect_app.parse_quad,
-        required=True,
+        required=require_quad,
     )
 
     parser.add_argument(
@@ -211,7 +208,7 @@ def select_digit_grid(
     profile: core.Profile,
 ) -> Grid:
     """
-    Select a tight rectangle around ALL THREE large digits.
+    Select a tight rectangle around all configured numeric digits.
 
     Do not include:
       - the scale above the digits,
@@ -244,9 +241,13 @@ def select_digit_grid(
             1,
         )
 
+    digit_count = len(
+        profile.digit_boxes
+    )
+
     cv2.putText(
         display,
-        "Select a tight box around ALL THREE numeric digits",
+        f"Select a tight box around all {digit_count} numeric positions",
         (10, 28),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.52,
@@ -256,7 +257,7 @@ def select_digit_grid(
     )
 
     window = (
-        "Select three-digit LCD grid - ENTER/SPACE accept"
+        f"Select {digit_count}-position LCD grid - ENTER/SPACE accept"
     )
 
     cv2.namedWindow(
@@ -812,16 +813,10 @@ def main(
         remaining
     )
 
-    if args.profile != "rds200":
-        print(
-            "Error: this experimental fixed-grid version "
-            "currently supports only --profile rds200.",
-            file=sys.stderr,
-        )
-
-        return 1
-
-    if args.roi is None:
+    if (
+        args.roi is None
+        and rectified_finder_factory is None
+    ):
         print(
             "Error: --roi is required.",
             file=sys.stderr,
@@ -858,7 +853,9 @@ def main(
         )
 
         base_profile = (
-            ORIGINAL_RDS200_PROFILE
+            core.PROFILES[
+                args.profile
+            ]
             if base_profile_override is None
             else base_profile_override
         )
@@ -926,7 +923,10 @@ def main(
             )
 
             print(
-                "Select a TIGHT rectangle around the THREE large digits.",
+                (
+                    "Select a TIGHT rectangle around all "
+                    f"{len(base_profile.digit_boxes)} numeric positions."
+                ),
                 file=sys.stderr,
             )
 

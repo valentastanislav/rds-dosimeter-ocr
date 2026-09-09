@@ -1,7 +1,7 @@
-id	profile	condition	role	filename	reference_time_s	roi	quad	grid	notes
+id	profile	condition	role	filename	reference_time_s	reference_box	roi	quad	grid	notes
 rds200_A_dev	rds200	A	dev	IMG_0747.mov					
 rds200_A_verify	rds200	A	verify	IMG_0744.mov					
-rds200_B_regression	rds200	B	cross_condition_regression	IMG_1151.MOV					Previously used extensively during development; not a true held-out video.
-rds30_A_dev	rds30	A	dev	IMG_0754.MOV	34.0				Used for G2 tracking development.
+rds200_B_regression	rds200	B	cross_condition_regression	IMG_1151.MOV						Previously used extensively during development; not a true held-out video.
+rds30_A_dev	rds30	A	dev	IMG_0754.MOV	34.0	0.288889,0.564583,0.675926,0.616667		0.359756,0.019718,0.991870,0.019718,0.993902,0.954930,0.337398,0.963380	0.010142,0.016854,0.989858,0.983146	Used for G2 tracking development.
 rds30_A_verify	rds30	A	verify	IMG_0753.MOV					
 rds30_B_heldout	rds30	B	heldout	IMG_1152.MOV					
