@@ -1454,6 +1454,7 @@ def validate_args(
 def main(
     argv: Sequence[str] | None = None,
     darkness_extractor: DarknessExtractor | None = None,
+    auxiliary_darkness_extractor: DarknessExtractor | None = None,
     profile_override: core.Profile | None = None,
     decode_samples: DecodeSamples | None = None,
     debug_writer: DebugWriter | None = None,
@@ -1687,8 +1688,8 @@ def main(
             auxiliary_darkness = None
 
             if (
-                profile.aux_segment_percentile
-                is not None
+                auxiliary_darkness_extractor is not None
+                or profile.aux_segment_percentile is not None
             ):
                 active_masks = (
                     shift_mask_bank.get(
@@ -1698,18 +1699,27 @@ def main(
                     )
                 )
 
-                auxiliary_darkness = (
-                    core.extract_darkness_from_patches(
-                        core.digit_patches(
+                if auxiliary_darkness_extractor is None:
+                    auxiliary_darkness = (
+                        core.extract_darkness_from_patches(
+                            core.digit_patches(
+                                display,
+                                profile,
+                            ),
+                            active_masks,
+                            segment_percentile=(
+                                profile.aux_segment_percentile
+                            ),
+                        )
+                    )
+                else:
+                    auxiliary_darkness = (
+                        auxiliary_darkness_extractor(
                             display,
                             profile,
-                        ),
-                        active_masks,
-                        segment_percentile=(
-                            profile.aux_segment_percentile
-                        ),
+                            active_masks,
+                        )
                     )
-                )
 
             samples.append(
                 core.Sample(

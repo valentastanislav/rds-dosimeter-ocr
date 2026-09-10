@@ -185,6 +185,19 @@ def parse_extra_args(
         default=None,
     )
 
+    parser.add_argument(
+        "--decoder-measurement",
+        choices=(
+            "profile",
+            "local-p70-seg10",
+        ),
+        default="profile",
+        help=(
+            "auxiliary decoder segment measurement strategy "
+            "(default: profile)"
+        ),
+    )
+
     return parser.parse_known_args(argv)
 
 
@@ -803,6 +816,28 @@ def make_fixed_extract_darkness(
     return configured_fixed_extract_darkness
 
 
+def make_decoder_measurement_extractor(
+    strategy: str,
+):
+    if strategy == "profile":
+        return None
+
+    if strategy == "local-p70-seg10":
+        return make_fixed_extract_darkness(
+            "none",
+            core.FixedGridMeasurementConfig(
+                mode="local",
+                segment_percentile=10.0,
+                background_percentile=70.0,
+            ),
+        )
+
+    raise ValueError(
+        "Unknown decoder measurement strategy: "
+        f"{strategy}"
+    )
+
+
 # ======================================================================
 # Rectified finder
 # ======================================================================
@@ -1082,6 +1117,12 @@ def main(
             )
         )
 
+        auxiliary_darkness_extractor = (
+            make_decoder_measurement_extractor(
+                extra.decoder_measurement
+            )
+        )
+
         display_finder = (
             selected_rectified_finder_factory(
                 extra.quad
@@ -1097,6 +1138,9 @@ def main(
                 remaining,
                 darkness_extractor=(
                     darkness_extractor
+                ),
+                auxiliary_darkness_extractor=(
+                    auxiliary_darkness_extractor
                 ),
                 profile_override=(
                     fixed_profile

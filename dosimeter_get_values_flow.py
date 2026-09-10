@@ -2347,6 +2347,14 @@ def main(
                     ]
                 )
 
+            if fixed_extra.decoder_measurement != "profile":
+                fixedgrid_argv.extend(
+                    [
+                        "--decoder-measurement",
+                        fixed_extra.decoder_measurement,
+                    ]
+                )
+
         (
             frame_width,
             frame_height,
