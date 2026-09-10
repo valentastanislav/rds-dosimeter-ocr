@@ -57,19 +57,9 @@ between pipeline layers, or shared mutable run state.
 Diagnostic-only tools such as `flow_diag` may temporarily use isolated
 instrumentation hooks, but production behavior must not depend on them.
 
-Generalization work has started.
-
-Completed generalization step:
-
-- G2: optical-flow changing-display exclusion geometry is profile-aware.
-
-Current important limitation:
-
-- fixed-grid still rejects RDS-30.
-- Do not remove that rejection casually. It currently protects against
-  incomplete profile generalization.
-- The next work should first make profile-specific measurement behavior
-  explicit, then enable RDS-30 through the shared fixed-grid/flow path.
+Generalization work has started. The shared fixed-grid/flow path now supports
+RDS-30 with profile-owned measurement and digit geometry. Optical-flow
+changing-display exclusion geometry is also profile-aware.
 
 
 ## Core design principle
@@ -109,9 +99,17 @@ Manual once-per-video initialization is acceptable and expected.
 It is acceptable for the user to provide or interactively determine:
 
 - reference time / reference frame
-- ROI / display location
+- `reference_box`: a padded carrier rectangle containing the complete
+  physical LCD plus a visible margin; its edges are not physical LCD
+  boundaries
 - perspective quad
-- digit grid if necessary
+- digit grid if required by the profile
+
+The perspective `quad` marks the four actual physical LCD corners inside
+`reference_box`, ordered top-left, top-right, bottom-right, bottom-left.
+
+RDS-30 uses profile-owned digit geometry and does not use a manual digit
+grid. RDS-200 retains its existing manual-grid behavior for now.
 
 These values may be stored and reused for reproducible tests.
 
@@ -376,11 +374,19 @@ Verification under similar conditions:
 
     IMG_0753.MOV
 
-Held-out different conditions, Condition B:
+Originally held-out different conditions, Condition B:
 
     IMG_1152.MOV
 
-`IMG_0754.MOV` was already used during G2 tracking development.
+`IMG_0754.MOV` is the RDS-30 Condition A development video and was used
+during tracking development. The validated RDS-30 canonical geometry was
+calibrated only on this video, then frozen before successful verification
+on the Condition A verification video, `IMG_0753.MOV`.
+
+`IMG_1152.MOV` exposed the old coordinate-contract problem and was consumed
+during geometry acceptance. It must not be used for further tuning or
+described as a clean held-out test. A future genuinely held-out RDS-30 test
+requires a new video.
 
 Do not arbitrarily substitute another local video when a canonical
 manifest entry exists.
@@ -416,15 +422,19 @@ Current verification videos:
 - RDS-200: `IMG_0744.mov`
 - RDS-30: `IMG_0753.MOV`
 
-### `heldout`
+### `consumed_heldout`
 
-Do not use to choose implementation parameters.
+This role records a video that was originally held out but has since been
+used during development or acceptance work.
 
-Evaluate only after the implementation choice is frozen.
+It must not be used for further tuning or claimed as a clean held-out test.
 
-Current held-out video:
+Current consumed held-out video:
 
 - RDS-30: `IMG_1152.MOV`
+
+There is currently no genuinely held-out RDS-30 video. A new video is
+required for future held-out evaluation.
 
 ### `cross_condition_regression`
 
@@ -441,9 +451,22 @@ Current case:
 `tests/video_manifest.tsv` may store:
 
 - `reference_time_s`
+- `reference_box`
 - `roi`
 - `quad`
 - `grid`
+
+Per-video initialization coordinates belong in `tests/video_manifest.tsv`,
+not in this document.
+
+The current manual convention is:
+
+- `reference_box` is a padded carrier rectangle containing the complete
+  physical LCD plus visible margin. Its edges are not the LCD boundaries.
+- `quad` contains the four physical LCD corners inside that carrier in
+  top-left, top-right, bottom-right, bottom-left order.
+- RDS-30 digit geometry is profile-owned and requires no manual grid.
+- RDS-200 keeps its existing manual-grid behavior for now.
 
 Once a manual initialization has been selected for a canonical test video,
 reuse it for algorithm regression tests.

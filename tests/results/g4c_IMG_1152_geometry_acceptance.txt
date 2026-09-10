@@ -1,0 +1,63 @@
+$ python3 dosimeter_get_values_flow.py \
+>   IMG_1152.MOV \
+>   out_1152.csv \
+>   --profile rds30 \
+>   --track-time 23.4 \
+>   --select-reference-box \
+>   --select-quad \
+>   --decimal-places 2 \
+>   --contrast auto \
+>   --raw-output raw_1152.csv \
+>   --debug-dir debug_1152
+Pre-reading sampled frames and locating reference display...
+Select a ROI and then press SPACE or ENTER button!
+Cancel the selection process by pressing c button!
+Selected reference display box:
+  --reference-box 0.194444,0.409375,0.637037,0.477083
+Selected perspective quad:
+  --quad 0.016260,0.022535,0.991870,0.025352,0.977642,0.957747,0.018293,0.960563
+Reference frame: 702 (t=23.400 s)
+Reference display box: x=105, y=393, w=239, h=65
+Initial tracking features: 44
+Fixed digit boxes:
+  digit 1: (5, 6, 116, 350)
+  digit 2: (121, 6, 232, 350)
+  digit 3: (237, 6, 354, 350)
+  digit 4: (355, 6, 488, 350)
+Fixed decimal candidates:
+
+Processing IMG_1152.MOV with profile rds30 at 30 samples/s (contrast=auto, min_confidence=0.2)...
+Display detection: 100.0% (1917/1917 frames)
+Digit recognition: 93.2% (1786/1917 frames)
+Recognition when display found: 93.2%
+Video duration:              63.912 s
+Display found:               100.00 %
+Recognized samples:           93.17 %
+Number of intervals:             31
+
+Time-weighted mean:          66.723
+Time-weighted variance:      538.43
+Time-weighted std. dev.:     23.204
+Minimum:                         16
+Maximum:                       96.6
+
+Intervals written to:    out_1152.csv
+Summary written to:      out_1152.csv.summary.json
+Raw samples written to:  raw_1152.csv
+Debug screenshots:       debug_1152
+
+Perspective quad used:
+  --quad 0.016260,0.022535,0.991870,0.025352,0.977642,0.957747,0.018293,0.960563
+
+Optical-flow tracking diagnostics:
+  steps               : 1916
+  accepted motion     : 1916
+  rejected motion     : 0
+  point redetections  : 193
+  mean tracked pts    : 37.0
+  mean RANSAC inliers : 37.0
+
+Debug cache diagnostics:
+  cached displays     : 1917
+  decimal mode        : fixed (2 places)
+  debug source        : cached main-pass displays

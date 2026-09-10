@@ -171,13 +171,13 @@ RDS200 = Profile(
 
 # RDS-30: the digit geometry is wider and slightly more trapezoidal.
 RDS30_SEGMENTS = {
-    "a": np.array([[27, 27], [51, 27], [48, 35], [23, 35]], np.int32),
-    "b": np.array([[56, 38], [64, 40], [61, 60], [53, 60]], np.int32),
-    "c": np.array([[53, 76], [61, 74], [58, 101], [50, 104]], np.int32),
-    "d": np.array([[21, 106], [47, 106], [44, 114], [18, 114]], np.int32),
-    "e": np.array([[12, 77], [20, 73], [17, 101], [9, 104]], np.int32),
-    "f": np.array([[17, 38], [24, 35], [21, 60], [14, 63]], np.int32),
-    "g": np.array([[24, 64], [51, 63], [46, 72], [20, 73]], np.int32),
+    "a": np.array([[22, 23], [46, 23], [43, 31], [18, 31]], np.int32),
+    "b": np.array([[51, 34], [59, 36], [56, 56], [48, 56]], np.int32),
+    "c": np.array([[48, 72], [56, 70], [53, 97], [45, 100]], np.int32),
+    "d": np.array([[16, 102], [42, 102], [39, 110], [13, 110]], np.int32),
+    "e": np.array([[7, 73], [15, 69], [12, 97], [4, 100]], np.int32),
+    "f": np.array([[12, 34], [19, 31], [16, 56], [9, 59]], np.int32),
+    "g": np.array([[19, 60], [46, 59], [41, 68], [15, 69]], np.int32),
 }
 
 # Position-specific seven-segment darkness prototypes for the RDS-30 profile.
@@ -242,10 +242,10 @@ RDS30 = Profile(
     canonical_width=493,
     canonical_height=356,
     digit_boxes=(
-        (5, 6, 116, 350),
-        (121, 6, 232, 350),
-        (237, 6, 354, 350),
-        (355, 6, 488, 350),
+        (171, 6, 237, 350),
+        (254, 6, 320, 350),
+        (337, 6, 403, 350),
+        (420, 6, 486, 350),
     ),
     segment_polygons=RDS30_SEGMENTS,
     decimal_places=2,

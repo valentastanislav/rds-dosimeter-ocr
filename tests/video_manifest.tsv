@@ -1,7 +1,7 @@
 id	profile	condition	role	filename	reference_time_s	reference_box	roi	quad	grid	notes
-rds200_A_dev	rds200	A	dev	IMG_0747.mov					
-rds200_A_verify	rds200	A	verify	IMG_0744.mov					
+rds200_A_dev	rds200	A	dev	IMG_0747.mov						Geometry not yet recorded under the current manual-initialization contract.
+rds200_A_verify	rds200	A	verify	IMG_0744.mov						Geometry not yet recorded under the current manual-initialization contract.
 rds200_B_regression	rds200	B	cross_condition_regression	IMG_1151.MOV						Previously used extensively during development; not a true held-out video.
-rds30_A_dev	rds30	A	dev	IMG_0754.MOV	34.0	0.288889,0.564583,0.675926,0.616667		0.359756,0.019718,0.991870,0.019718,0.993902,0.954930,0.337398,0.963380		Used for G2 tracking development.
-rds30_A_verify	rds30	A	verify	IMG_0753.MOV	34.0	0.337037,0.592708,0.637037,0.636458		0.313008,0.019718,0.991870,0.022535,0.991870,0.940845,0.298781,0.963380		Profile geometry; grid intentionally blank.
-rds30_B_heldout	rds30	B	heldout	IMG_1152.MOV					
+rds30_A_dev	rds30	A	dev	IMG_0754.MOV	34.0	0.262963,0.551042,0.694444,0.629167		0.042683,0.090141,0.971545,0.053521,0.983740,0.892958,0.038618,0.940845		RDS-30 development video with corrected padded-carrier and physical-LCD-corner initialization.
+rds30_A_verify	rds30	A	verify	IMG_0753.MOV	34.0	0.322222,0.582292,0.648148,0.644792		0.028455,0.107042,0.963415,0.090141,0.979675,0.904225,0.024390,0.932394		Same-condition RDS-30 verification video using the corrected manual initialization.
+rds30_B_heldout	rds30	B	consumed_heldout	IMG_1152.MOV						Previously held out; consumed during geometry acceptance. Do not use for tuning.

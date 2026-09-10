@@ -24,3 +24,24 @@ architecture while preserving benchmark behaviour.
 See `requirements.txt`.
 
 The system also needs `ffmpeg` and `ffprobe`.
+
+## Usage
+Manual initialization
+
+--reference-box
+    Select a loose rectangular region containing the complete physical
+    LCD/display plus a small visible margin on all sides. The reference-box
+    edges are only a carrier/crop boundary; they are not the LCD boundary.
+
+--quad
+    Inside that reference crop, mark the four actual physical corners of
+    the LCD/display in order:
+    top-left, top-right, bottom-right, bottom-left.
+
+RDS-30:
+    Do not select a digit grid. Digit positions and segment geometry are
+    properties of the RDS-30 profile, including the possibly blank leading
+    digit.
+
+RDS-200:
+    A manual digit grid is still required.
