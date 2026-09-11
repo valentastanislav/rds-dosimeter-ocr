@@ -120,6 +120,10 @@ ReferenceBoxSelector = Callable[
     [np.ndarray],
     ReferenceBox,
 ]
+FLOW_CLI_USAGE = (
+    "python3 dosimeter_get_values_flow.py "
+    "<video file> <output file> [options]"
+)
 
 
 # ======================================================================
@@ -175,35 +179,31 @@ def select_reference_box(
 
     window_name = (
         "Select COMPLETE physical LCD/display region - "
-        "ENTER/SPACE accept, ESC cancel"
+        "ENTER/SPACE accept, C/ESC cancel"
     )
 
     try:
-        cv2.namedWindow(
-            window_name,
-            cv2.WINDOW_NORMAL,
-        )
+        with rect_app.selection_cleanup(window_name):
+            cv2.namedWindow(
+                window_name,
+                cv2.WINDOW_NORMAL,
+            )
 
-        x, y, box_width, box_height = cv2.selectROI(
-            window_name,
-            frame,
-            showCrosshair=True,
-            fromCenter=False,
-        )
-
-        cv2.destroyWindow(
-            window_name
-        )
+            x, y, box_width, box_height = cv2.selectROI(
+                window_name,
+                frame,
+                showCrosshair=True,
+                fromCenter=False,
+            )
 
     except cv2.error as exc:
-        try:
-            cv2.destroyAllWindows()
-        except cv2.error:
-            pass
-
         raise RuntimeError(
             "OpenCV could not open the reference-box selection window. "
             "Use --reference-box x1,y1,x2,y2 instead."
+        ) from exc
+    except KeyboardInterrupt as exc:
+        raise RuntimeError(
+            "Reference-box selection cancelled."
         ) from exc
 
     if box_width <= 0 or box_height <= 0:
@@ -231,6 +231,7 @@ def parse_wrapper_args(
     parser = argparse.ArgumentParser(
         add_help=False,
         allow_abbrev=False,
+        usage=FLOW_CLI_USAGE,
     )
 
     parser.add_argument(
@@ -355,12 +356,47 @@ def parse_wrapper_args(
     )
 
     parser.add_argument(
+        "--joint-spatial-min-nine-margin",
+        type=float,
+        default=None,
+        help=(
+            "reject a joint-spatial sample when any decoded 9 has a "
+            "smaller glyph margin; disabled by default"
+        ),
+    )
+
+    parser.add_argument(
+        "--joint-spatial-geometry-emission",
+        choices=(
+            "glyph-best",
+            "glyph-independent",
+        ),
+        default="glyph-best",
+        help=(
+            "geometry Viterbi emission for the opt-in RDS-30 "
+            "joint-spatial decoder (default: glyph-best)"
+        ),
+    )
+
+    parser.add_argument(
         "--joint-spatial-diagnostics-dir",
         type=Path,
         default=None,
         help=(
             "optional geometry and visual diagnostics directory for "
             "the opt-in RDS-30 joint-spatial decoder"
+        ),
+    )
+
+    parser.add_argument(
+        "--joint-spatial-preview-frame",
+        type=int,
+        action="append",
+        default=None,
+        metavar="FRAME_INDEX",
+        help=(
+            "add a sampled-frame index to the joint-spatial diagnostic "
+            "preview set; may be repeated"
         ),
     )
 
@@ -2098,6 +2134,7 @@ def main(
             require_quad=(
                 not wrapper_args.select_quad
             ),
+            usage=FLOW_CLI_USAGE,
         )
     )
 
@@ -2114,7 +2151,8 @@ def main(
 
     args = (
         fixed_app.parse_roi_args(
-            roi_remaining
+            roi_remaining,
+            usage=FLOW_CLI_USAGE,
         )
     )
 
@@ -2146,6 +2184,27 @@ def main(
         ):
             raise RuntimeError(
                 "--joint-spatial-confidence must be between 0 and 1."
+            )
+
+        if (
+            wrapper_args.joint_spatial_min_nine_margin is not None
+            and (
+                not math.isfinite(wrapper_args.joint_spatial_min_nine_margin)
+                or wrapper_args.joint_spatial_min_nine_margin < 0.0
+            )
+        ):
+            raise RuntimeError(
+                "--joint-spatial-min-nine-margin must be a finite, "
+                "non-negative number."
+            )
+
+        if (
+            wrapper_args.joint_spatial_min_nine_margin is not None
+            and wrapper_args.decoder_strategy != "rds30-joint-spatial"
+        ):
+            raise RuntimeError(
+                "--joint-spatial-min-nine-margin requires "
+                "--decoder-strategy rds30-joint-spatial."
             )
 
         if (
@@ -2453,6 +2512,15 @@ def main(
                 ),
                 diagnostics_dir=(
                     wrapper_args.joint_spatial_diagnostics_dir
+                ),
+                geometry_emission_strategy=(
+                    wrapper_args.joint_spatial_geometry_emission
+                ),
+                preview_frames=(
+                    wrapper_args.joint_spatial_preview_frame
+                ),
+                min_nine_margin=(
+                    wrapper_args.joint_spatial_min_nine_margin
                 ),
             )
         else:

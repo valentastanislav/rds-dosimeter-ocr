@@ -1143,12 +1143,14 @@ def save_debug_screenshots_roi(
 
 def parse_args(
     argv: Sequence[str] | None = None,
+    usage: str | None = None,
 ) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Extract changing seven-segment values from a "
             "dosimeter video, with optional ROI restriction."
-        )
+        ),
+        usage=usage,
     )
 
     parser.add_argument(

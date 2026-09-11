@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import math
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
@@ -22,6 +23,16 @@ import dosimeter_get_values as core
 
 
 HORIZONTAL_SEGMENTS = frozenset(("a", "d", "g"))
+GEOMETRY_EMISSION_GLYPH_BEST = "glyph-best"
+GEOMETRY_EMISSION_GLYPH_INDEPENDENT = "glyph-independent"
+GEOMETRY_EMISSION_STRATEGIES = frozenset(
+    (
+        GEOMETRY_EMISSION_GLYPH_BEST,
+        GEOMETRY_EMISSION_GLYPH_INDEPENDENT,
+    )
+)
+GEOMETRY_ALIGNMENT_SCALE = 20.0
+GEOMETRY_STRONGEST_SEGMENTS = 3
 
 
 @dataclass(frozen=True, order=True)
@@ -66,6 +77,8 @@ class JointSpatialConfig:
     temporal_differential_weight: float = 0.08
     geometry_boundary_penalty: float = 0.20
     rejection_threshold: float = 0.40
+    min_nine_margin: float | None = None
+    geometry_emission_strategy: str = GEOMETRY_EMISSION_GLYPH_BEST
     horizontal_model: SegmentEvidenceModel = SegmentEvidenceModel(
         intercept=-2.0,
         global_weight=0.045,
@@ -98,15 +111,71 @@ class JointSpatialFrameDiagnostic:
     evidence_agreement: float
     spatial_quality: float
     geometry_gap: float
+    geometry_emission: float
     temporal_change: float
     boundary: bool
     confidence: float
     accepted: bool
+    weak_nine_rejected: bool
 
 
 @dataclass
 class JointSpatialDiagnostics:
     frames: list[JointSpatialFrameDiagnostic] = field(default_factory=list)
+
+
+def select_preview_frame_indices(
+    frames: Sequence[JointSpatialFrameDiagnostic],
+    forced_frames: Sequence[int] = (),
+) -> tuple[set[int], list[int]]:
+    """Return the existing automatic preview set plus valid forced frames."""
+
+    if not frames:
+        return set(), list(forced_frames)
+
+    selected = {
+        0,
+        max(0, len(frames) // 2),
+        max(0, len(frames) - 1),
+    }
+    ranked_confidence = sorted(
+        frames,
+        key=lambda item: item.confidence,
+    )
+    selected.update(item.frame_index for item in ranked_confidence[:8])
+    selected.update(item.frame_index for item in ranked_confidence[-3:])
+    for position in (2, 3):
+        ranked_margin = sorted(
+            frames,
+            key=lambda item: item.digit_margins[position],
+        )
+        selected.update(item.frame_index for item in ranked_margin[:5])
+    for position in range(4):
+        observed_digits = {
+            item.digits[position]
+            for item in frames
+            if item.accepted
+        }
+        for digit in observed_digits:
+            examples = [
+                item
+                for item in frames
+                if item.accepted and item.digits[position] == digit
+            ]
+            selected.add(
+                min(
+                    examples,
+                    key=lambda item: item.digit_margins[position],
+                ).frame_index
+            )
+
+    invalid: list[int] = []
+    for frame_index in forced_frames:
+        if 0 <= frame_index < len(frames):
+            selected.add(frame_index)
+        else:
+            invalid.append(frame_index)
+    return selected, invalid
 
 
 def normalized_digit_x(position: int, digit_count: int) -> float:
@@ -172,6 +241,19 @@ def glyph_log_likelihood(
 
 def confidence_accepts(confidence: float, threshold: float) -> bool:
     return math.isfinite(confidence) and confidence >= threshold
+
+
+def weak_nine_margin_rejects(
+    digits: Sequence[int],
+    margins: Sequence[float],
+    minimum_margin: float | None,
+) -> bool:
+    if minimum_margin is None:
+        return False
+    return any(
+        digit == 9 and margin < minimum_margin
+        for digit, margin in zip(digits, margins)
+    )
 
 
 def translate_mask(mask: np.ndarray, dx: int, dy: int) -> np.ndarray:
@@ -365,6 +447,76 @@ def _probability_series(
     return 1.0 / (1.0 + np.exp(-logits))
 
 
+def geometry_alignment_score_series(evidence: np.ndarray) -> np.ndarray:
+    """Score physical stroke alignment without assuming an active glyph.
+
+    A segment contributes only when contrast, continuity, and edge direction
+    all support a stroke under its mask. Cross-oriented edge energy is
+    subtracted so that, for example, a horizontal mask is not rewarded for
+    merely crossing a vertical stroke. The strongest three segment scores
+    are averaged so sparse and dense glyphs can both locate the mask field
+    without requiring any named segment to be active.
+    """
+
+    values = np.asarray(evidence, dtype=float)
+    if values.ndim != 3 or values.shape[1:] != (7, 5):
+        raise ValueError("segment evidence must have shape (frames, 7, 5)")
+    values = np.nan_to_num(values, nan=-np.inf, posinf=np.inf, neginf=-np.inf)
+    contrast = np.minimum(values[:, :, 0], values[:, :, 1])
+    directional_edge = values[:, :, 2] - np.maximum(0.0, values[:, :, 3])
+    physical_support = np.minimum.reduce(
+        (
+            contrast,
+            directional_edge,
+            values[:, :, 4],
+        )
+    )
+    physical_support = np.clip(physical_support, 0.0, 255.0)
+    normalized = 1.0 - np.exp(-physical_support / GEOMETRY_ALIGNMENT_SCALE)
+    strongest = np.partition(
+        normalized,
+        normalized.shape[1] - GEOMETRY_STRONGEST_SEGMENTS,
+        axis=1,
+    )[:, -GEOMETRY_STRONGEST_SEGMENTS:]
+    return np.mean(strongest, axis=1).astype(np.float32)
+
+
+def build_geometry_emissions(
+    strategy: str,
+    glyph_best_scores: Sequence[np.ndarray],
+    glyph_independent_scores: Sequence[np.ndarray] | None,
+    state_offset_index: np.ndarray,
+    boundary_penalties: np.ndarray,
+) -> np.ndarray:
+    """Build per-state emissions using the selected geometry evidence."""
+
+    if strategy == GEOMETRY_EMISSION_GLYPH_BEST:
+        position_scores = glyph_best_scores
+        positions = range(len(glyph_best_scores))
+    elif strategy == GEOMETRY_EMISSION_GLYPH_INDEPENDENT:
+        if glyph_independent_scores is None:
+            raise ValueError("glyph-independent geometry scores are required")
+        position_scores = glyph_independent_scores
+        # Position zero is normally blank and has no reliable strokes with
+        # which to estimate physical mask alignment.
+        positions = range(1, len(glyph_independent_scores))
+    else:
+        raise ValueError(f"unknown geometry emission strategy: {strategy}")
+
+    frame_count = position_scores[0].shape[0]
+    emissions = np.zeros(
+        (frame_count, state_offset_index.shape[0]),
+        dtype=np.float32,
+    )
+    for position in positions:
+        emissions += position_scores[position][
+            :,
+            state_offset_index[:, position],
+        ]
+    emissions -= np.asarray(boundary_penalties, dtype=np.float32)[None, :]
+    return emissions
+
+
 def _temporal_median_evidence(data: np.ndarray, window: int) -> np.ndarray:
     if window <= 1 or len(data) == 0:
         return data.copy()
@@ -451,10 +603,17 @@ class JointSpatialDecoder:
         display_cache: dict[int, np.ndarray],
         config: JointSpatialConfig | None = None,
         diagnostics_dir: Path | None = None,
+        preview_frames: Sequence[int] | None = None,
     ) -> None:
         self.display_cache = display_cache
         self.config = JointSpatialConfig() if config is None else config
+        if self.config.geometry_emission_strategy not in GEOMETRY_EMISSION_STRATEGIES:
+            raise ValueError(
+                "unknown geometry emission strategy: "
+                f"{self.config.geometry_emission_strategy}"
+            )
         self.diagnostics_dir = diagnostics_dir
+        self.preview_frames = () if preview_frames is None else tuple(preview_frames)
         self.diagnostics = JointSpatialDiagnostics()
 
     def __call__(
@@ -502,6 +661,7 @@ class JointSpatialDecoder:
         position_entropy: list[np.ndarray] = []
         position_agreement: list[np.ndarray] = []
         position_spatial: list[np.ndarray] = []
+        position_geometry: list[np.ndarray] = []
 
         for position, position_offsets in enumerate(offsets_by_position):
             score_table = np.empty((frame_count, len(position_offsets)), dtype=np.float32)
@@ -510,6 +670,12 @@ class JointSpatialDecoder:
             entropy_table = np.empty((frame_count, len(position_offsets)), dtype=np.float32)
             agreement_table = np.empty((frame_count, len(position_offsets)), dtype=np.float32)
             spatial_table = np.empty((frame_count, len(position_offsets)), dtype=np.float32)
+            geometry_table = (
+                np.empty((frame_count, len(position_offsets)), dtype=np.float32)
+                if self.config.geometry_emission_strategy
+                == GEOMETRY_EMISSION_GLYPH_INDEPENDENT
+                else None
+            )
             legal_patterns = ([(-1, blank_pattern)] + glyph_patterns) if position == 0 else glyph_patterns
             global_background = np.percentile(patches[position], 90.0, axis=(1, 2))
             for offset_index, (dx, dy) in enumerate(position_offsets):
@@ -530,6 +696,10 @@ class JointSpatialDecoder:
                     evidence,
                     self.config.temporal_window,
                 )
+                if geometry_table is not None:
+                    geometry_table[:, offset_index] = geometry_alignment_score_series(
+                        evidence
+                    )
                 probabilities = np.column_stack(
                     [
                         _probability_series(
@@ -589,6 +759,8 @@ class JointSpatialDecoder:
             position_entropy.append(entropy_table)
             position_agreement.append(agreement_table)
             position_spatial.append(spatial_table)
+            if geometry_table is not None:
+                position_geometry.append(geometry_table)
 
         state_offset_index = np.asarray(
             [
@@ -597,13 +769,21 @@ class JointSpatialDecoder:
             ],
             dtype=np.int16,
         )
-        emissions = np.zeros((frame_count, len(states)), dtype=np.float32)
-        for position in range(4):
-            emissions += position_scores[position][:, state_offset_index[:, position]]
-        emissions -= np.asarray(
-            [self.config.geometry_boundary_penalty if _boundary(state, self.config) else 0.0 for state in states],
-            dtype=np.float32,
-        )[None, :]
+        emissions = build_geometry_emissions(
+            self.config.geometry_emission_strategy,
+            position_scores,
+            position_geometry or None,
+            state_offset_index,
+            np.asarray(
+                [
+                    self.config.geometry_boundary_penalty
+                    if _boundary(state, self.config)
+                    else 0.0
+                    for state in states
+                ],
+                dtype=np.float32,
+            ),
+        )
 
         keep = min(self.config.coarse_candidate_count, len(states))
         top = np.argpartition(emissions, -keep, axis=1)[:, -keep:]
@@ -674,6 +854,7 @@ class JointSpatialDecoder:
                 int(order[1]),
             )
             geometry_gap = float(emissions[frame_index, state_index] - emissions[frame_index, geometry_second])
+            geometry_emission = float(emissions[frame_index, state_index])
             previous_state = state if frame_index == 0 else states[int(path[frame_index - 1])]
             temporal_change = _state_distance(previous_state, state)
             boundary = _boundary(state, self.config)
@@ -696,6 +877,12 @@ class JointSpatialDecoder:
                 samples[frame_index].display_found
                 and confidence_accepts(confidence, self.config.rejection_threshold)
             )
+            weak_nine_rejected = weak_nine_margin_rejects(
+                digits,
+                margins,
+                self.config.min_nine_margin,
+            )
+            accepted = accepted and not weak_nine_rejected
 
             value_digits = digits[1:] if digits and digits[0] == -1 else digits
             value: float | None = None
@@ -717,10 +904,12 @@ class JointSpatialDecoder:
                     evidence_agreement=mean_agreement,
                     spatial_quality=mean_spatial,
                     geometry_gap=geometry_gap,
+                    geometry_emission=geometry_emission,
                     temporal_change=temporal_change,
                     boundary=boundary,
                     confidence=confidence,
                     accepted=accepted,
+                    weak_nine_rejected=weak_nine_rejected,
                 )
             )
 
@@ -733,6 +922,11 @@ class JointSpatialDecoder:
         assert output_dir is not None
         output_dir.mkdir(parents=True, exist_ok=True)
         geometry_path = output_dir / "geometry.csv"
+        include_geometry_emission = (
+            self.config.geometry_emission_strategy
+            == GEOMETRY_EMISSION_GLYPH_INDEPENDENT
+        )
+        include_weak_nine_rejected = self.config.min_nine_margin is not None
         with geometry_path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(
@@ -743,6 +937,8 @@ class JointSpatialDecoder:
                     "margin1", "margin2", "margin3", "margin4",
                     "segment_entropy", "evidence_agreement", "spatial_quality",
                     "geometry_gap", "temporal_change", "boundary", "confidence", "accepted",
+                    *(("geometry_emission",) if include_geometry_emission else ()),
+                    *(("weak_nine_rejected",) if include_weak_nine_rejected else ()),
                 )
             )
             for item in self.diagnostics.frames:
@@ -757,46 +953,32 @@ class JointSpatialDecoder:
                         f"{item.spatial_quality:.8f}", f"{item.geometry_gap:.8f}",
                         f"{item.temporal_change:.8f}", int(item.boundary),
                         f"{item.confidence:.8f}", int(item.accepted),
+                        *(
+                            (f"{item.geometry_emission:.8f}",)
+                            if include_geometry_emission
+                            else ()
+                        ),
+                        *(
+                            (int(item.weak_nine_rejected),)
+                            if include_weak_nine_rejected
+                            else ()
+                        ),
                     )
                 )
 
         preview_dir = output_dir / "preview"
         preview_dir.mkdir(parents=True, exist_ok=True)
-        selected = {
-            0,
-            max(0, len(self.diagnostics.frames) // 2),
-            max(0, len(self.diagnostics.frames) - 1),
-        }
-        ranked_confidence = sorted(
+        selected, invalid_frames = select_preview_frame_indices(
             self.diagnostics.frames,
-            key=lambda item: item.confidence,
+            self.preview_frames,
         )
-        selected.update(item.frame_index for item in ranked_confidence[:8])
-        selected.update(item.frame_index for item in ranked_confidence[-3:])
-        for position in (2, 3):
-            ranked_margin = sorted(
-                self.diagnostics.frames,
-                key=lambda item: item.digit_margins[position],
+        for frame_index in invalid_frames:
+            print(
+                "Warning: --joint-spatial-preview-frame "
+                f"{frame_index} is outside the valid range "
+                f"0..{len(self.diagnostics.frames) - 1}; ignoring.",
+                file=sys.stderr,
             )
-            selected.update(item.frame_index for item in ranked_margin[:5])
-        for position in range(4):
-            observed_digits = {
-                item.digits[position]
-                for item in self.diagnostics.frames
-                if item.accepted
-            }
-            for digit in observed_digits:
-                examples = [
-                    item
-                    for item in self.diagnostics.frames
-                    if item.accepted and item.digits[position] == digit
-                ]
-                selected.add(
-                    min(
-                        examples,
-                        key=lambda item: item.digit_margins[position],
-                    ).frame_index
-                )
         masks, _ = make_local_masks(profile)
         for frame_index in sorted(selected):
             item = self.diagnostics.frames[frame_index]
@@ -838,9 +1020,14 @@ class JointSpatialDecoder:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 0, 220), 1, cv2.LINE_AA,
                 )
             status = "ACCEPT" if item.accepted else "REJECT"
+            emission_text = (
+                f" emission={item.geometry_emission:.3f}"
+                if include_geometry_emission
+                else ""
+            )
             cv2.putText(
                 canvas,
-                f"{status} conf={item.confidence:.3f} geom=({item.state.tx},{item.state.ty},{item.state.kx},{item.state.ky})",
+                f"{status} conf={item.confidence:.3f} geom=({item.state.tx},{item.state.ty},{item.state.kx},{item.state.ky}){emission_text}",
                 (8, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
                 (0, 160, 0) if item.accepted else (0, 0, 220), 1, cv2.LINE_AA,
             )
@@ -852,10 +1039,29 @@ def make_joint_spatial_decoder(
     display_cache: dict[int, np.ndarray],
     rejection_threshold: float | None = None,
     diagnostics_dir: Path | None = None,
+    geometry_emission_strategy: str = GEOMETRY_EMISSION_GLYPH_BEST,
+    preview_frames: Sequence[int] | None = None,
+    min_nine_margin: float | None = None,
 ) -> JointSpatialDecoder:
     config = JointSpatialConfig()
-    if rejection_threshold is not None:
+    if (
+        rejection_threshold is not None
+        or min_nine_margin is not None
+        or geometry_emission_strategy != GEOMETRY_EMISSION_GLYPH_BEST
+    ):
         from dataclasses import replace
 
-        config = replace(config, rejection_threshold=rejection_threshold)
-    return JointSpatialDecoder(display_cache, config=config, diagnostics_dir=diagnostics_dir)
+        changes: dict[str, float | str] = {
+            "geometry_emission_strategy": geometry_emission_strategy,
+        }
+        if rejection_threshold is not None:
+            changes["rejection_threshold"] = rejection_threshold
+        if min_nine_margin is not None:
+            changes["min_nine_margin"] = min_nine_margin
+        config = replace(config, **changes)
+    return JointSpatialDecoder(
+        display_cache,
+        config=config,
+        diagnostics_dir=diagnostics_dir,
+        preview_frames=preview_frames,
+    )

@@ -45,6 +45,8 @@ from __future__ import annotations
 
 import argparse
 import sys
+import termios
+from contextlib import contextmanager
 
 import cv2
 import numpy as np
@@ -211,6 +213,47 @@ def find_reference_display(
 # ======================================================================
 
 
+@contextmanager
+def selection_cleanup(window_name: str):
+    """Always close a selector window and restore terminal input state."""
+
+    terminal_state = None
+    try:
+        if sys.stdin.isatty():
+            file_descriptor = sys.stdin.fileno()
+            terminal_state = (
+                file_descriptor,
+                termios.tcgetattr(file_descriptor),
+            )
+    except (OSError, ValueError, termios.error):
+        terminal_state = None
+
+    try:
+        yield
+    finally:
+        try:
+            cv2.destroyWindow(window_name)
+        except cv2.error:
+            try:
+                cv2.destroyAllWindows()
+            except cv2.error:
+                pass
+        try:
+            cv2.waitKey(1)
+        except cv2.error:
+            pass
+        if terminal_state is not None:
+            file_descriptor, attributes = terminal_state
+            try:
+                termios.tcsetattr(
+                    file_descriptor,
+                    termios.TCSANOW,
+                    attributes,
+                )
+            except (OSError, ValueError, termios.error):
+                pass
+
+
 def select_quad(
     display: np.ndarray,
 ) -> np.ndarray:
@@ -225,7 +268,7 @@ def select_quad(
     Then SPACE or ENTER.
 
     R resets the selection.
-    ESC cancels.
+    C or ESC cancels.
     """
 
     if display.ndim == 2:
@@ -253,7 +296,7 @@ def select_quad(
 
     window_name = (
         "Select corners: TL -> TR -> BR -> BL | "
-        "SPACE/ENTER=accept  R=reset  ESC=cancel"
+        "SPACE/ENTER=accept  R=reset  C/ESC=cancel"
     )
 
     def redraw() -> None:
@@ -350,54 +393,56 @@ def select_quad(
 
             redraw()
 
-    cv2.namedWindow(
-        window_name,
-        cv2.WINDOW_NORMAL,
-    )
-
-    cv2.setMouseCallback(
-        window_name,
-        mouse_callback,
-    )
-
-    redraw()
-
-    while True:
-        key = (
-            cv2.waitKey(30)
-            & 0xFF
-        )
-
-        if key == 27:
-            cv2.destroyWindow(
-                window_name
+    try:
+        with selection_cleanup(window_name):
+            cv2.namedWindow(
+                window_name,
+                cv2.WINDOW_NORMAL,
             )
 
-            raise RuntimeError(
-                "Quad selection cancelled."
+            cv2.setMouseCallback(
+                window_name,
+                mouse_callback,
             )
 
-        if key in (
-            ord("r"),
-            ord("R"),
-        ):
-            points.clear()
             redraw()
-            continue
 
-        if (
-            len(points) == 4
-            and key in (
-                13,
-                10,
-                32,
-            )
-        ):
-            break
+            while True:
+                key = (
+                    cv2.waitKey(30)
+                    & 0xFF
+                )
 
-    cv2.destroyWindow(
-        window_name
-    )
+                if key in (
+                    27,
+                    ord("c"),
+                    ord("C"),
+                ):
+                    raise RuntimeError(
+                        "Quad selection cancelled."
+                    )
+
+                if key in (
+                    ord("r"),
+                    ord("R"),
+                ):
+                    points.clear()
+                    redraw()
+                    continue
+
+                if (
+                    len(points) == 4
+                    and key in (
+                        13,
+                        10,
+                        32,
+                    )
+                ):
+                    break
+    except KeyboardInterrupt as exc:
+        raise RuntimeError(
+            "Quad selection cancelled."
+        ) from exc
 
     array = np.asarray(
         points,

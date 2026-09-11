@@ -154,12 +154,14 @@ def format_grid(
 def parse_extra_args(
     argv: Sequence[str] | None = None,
     require_quad: bool = True,
+    usage: str | None = None,
 ) -> tuple[
     argparse.Namespace,
     list[str],
 ]:
     parser = argparse.ArgumentParser(
-        add_help=False
+        add_help=False,
+        usage=usage,
     )
 
     parser.add_argument(
@@ -203,9 +205,11 @@ def parse_extra_args(
 
 def parse_roi_args(
     remaining: list[str],
+    usage: str | None = None,
 ) -> argparse.Namespace:
     return roi_app.parse_args(
-        remaining
+        remaining,
+        usage=usage,
     )
 
 
