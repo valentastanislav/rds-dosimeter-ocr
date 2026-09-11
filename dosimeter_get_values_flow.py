@@ -331,6 +331,39 @@ def parse_wrapper_args(
         ),
     )
 
+    parser.add_argument(
+        "--decoder-strategy",
+        choices=(
+            "default",
+            "rds30-joint-spatial",
+        ),
+        default="default",
+        help=(
+            "decoder strategy applied to cached main-pass displays "
+            "(default: default)"
+        ),
+    )
+
+    parser.add_argument(
+        "--joint-spatial-confidence",
+        type=float,
+        default=None,
+        help=(
+            "accepted-frame confidence threshold for the opt-in "
+            "RDS-30 joint-spatial decoder"
+        ),
+    )
+
+    parser.add_argument(
+        "--joint-spatial-diagnostics-dir",
+        type=Path,
+        default=None,
+        help=(
+            "optional geometry and visual diagnostics directory for "
+            "the opt-in RDS-30 joint-spatial decoder"
+        ),
+    )
+
     return parser.parse_known_args(
         argv
     )
@@ -2107,6 +2140,23 @@ def main(
             else profile_override
         )
 
+        if (
+            wrapper_args.joint_spatial_confidence is not None
+            and not 0.0 <= wrapper_args.joint_spatial_confidence <= 1.0
+        ):
+            raise RuntimeError(
+                "--joint-spatial-confidence must be between 0 and 1."
+            )
+
+        if (
+            wrapper_args.decoder_strategy == "rds30-joint-spatial"
+            and decode_samples is not None
+        ):
+            raise RuntimeError(
+                "The joint-spatial CLI strategy cannot be combined with "
+                "an injected decode_samples callable."
+            )
+
         fixed_app.validate_geometry_options(
             profile,
             fixed_extra.select_grid,
@@ -2391,11 +2441,26 @@ def main(
                 for value in decimal_places_sequence
             )
 
-        selected_decode_samples = (
-            core.decode_samples
-            if decode_samples is None
-            else decode_samples
-        )
+        if wrapper_args.decoder_strategy == "rds30-joint-spatial":
+            from dosimeter_rds30_joint_spatial import (
+                make_joint_spatial_decoder,
+            )
+
+            selected_decode_samples = make_joint_spatial_decoder(
+                display_cache,
+                rejection_threshold=(
+                    wrapper_args.joint_spatial_confidence
+                ),
+                diagnostics_dir=(
+                    wrapper_args.joint_spatial_diagnostics_dir
+                ),
+            )
+        else:
+            selected_decode_samples = (
+                core.decode_samples
+                if decode_samples is None
+                else decode_samples
+            )
 
         def decode_samples_with_decimal_observer(
             samples,
