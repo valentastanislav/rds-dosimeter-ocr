@@ -1308,9 +1308,36 @@ def digit_scores(
     return sorted(scores)
 
 
+def _binary_pattern_confidence(
+    levels: np.ndarray,
+    binary_digit: int,
+    patterns: dict[int, tuple[int, ...]],
+) -> float | None:
+    pattern = np.asarray(patterns[binary_digit], dtype=bool)
+    minimum_active = float(np.min(levels[pattern]))
+    maximum_inactive = (
+        float(np.max(levels[~pattern])) if np.any(~pattern) else float("-inf")
+    )
+
+    if binary_digit == 8:
+        # With no inactive segments, require every segment to be clearly
+        # dark.  This prevents reflections/poor crops from creating 8s.
+        accepted = minimum_active >= 14.0
+        separation = minimum_active - 14.0
+    else:
+        accepted = minimum_active >= 7.0 and maximum_inactive <= 6.0
+        separation = min(minimum_active - 7.0, 6.0 - maximum_inactive)
+
+    if not accepted:
+        return None
+
+    return float(np.clip(0.5 + 0.08 * separation, 0.0, 1.0))
+
+
 def decode_pattern_digit(
     darkness: np.ndarray,
     patterns: dict[int, tuple[int, ...]],
+    rds200_pattern_refinement: bool = False,
 ) -> tuple[int | None, float]:
     """Decode one RDS-200 digit.
 
@@ -1322,6 +1349,10 @@ def decode_pattern_digit(
     The correction is deliberately asymmetric: it is applied when the baseline
     selected 1 (or rejected the digit), because that is the observed failure
     mode.  This avoids turning uniform glare into spurious 8s.
+
+    The optional experimental refinement can strengthen confidence when the
+    exact binary result agrees with the baseline, and can accept a uniformly
+    strong all-active 8.  It is disabled by default.
     """
     scores = digit_scores(darkness, patterns)
     best = scores[0]
@@ -1341,29 +1372,55 @@ def decode_pattern_digit(
     pattern_to_digit = {tuple(pattern): digit for digit, pattern in patterns.items()}
     binary_digit = pattern_to_digit.get(observed)
 
-    if (
+    legacy_binary_override = (
         binary_digit is not None
         and binary_digit != 1
         and binary_digit != baseline_digit
         and baseline_digit in (None, 1)
-    ):
-        pattern = np.asarray(patterns[binary_digit], dtype=bool)
-        minimum_active = float(np.min(levels[pattern]))
-        maximum_inactive = (
-            float(np.max(levels[~pattern])) if np.any(~pattern) else float("-inf")
+        and not (rds200_pattern_refinement and binary_digit == 8)
+    )
+    refined_binary_match = (
+        rds200_pattern_refinement
+        and binary_digit is not None
+        and binary_digit == baseline_digit
+    )
+    refined_eight_override = (
+        rds200_pattern_refinement
+        and binary_digit == 8
+        and baseline_digit != 8
+    )
+    binary_confidence = (
+        _binary_pattern_confidence(levels, binary_digit, patterns)
+        if binary_digit is not None
+        and (
+            legacy_binary_override
+            or refined_binary_match
+            or refined_eight_override
         )
+        else None
+    )
 
-        if binary_digit == 8:
-            # With no inactive segments, require every segment to be clearly
-            # dark.  This prevents reflections/poor crops from creating 8s.
-            accepted = minimum_active >= 14.0
-            separation = minimum_active - 14.0
-        else:
-            accepted = minimum_active >= 7.0 and maximum_inactive <= 6.0
-            separation = min(minimum_active - 7.0, 6.0 - maximum_inactive)
+    if (
+        refined_binary_match
+        and binary_confidence is not None
+    ):
+        return int(baseline_digit), max(confidence, binary_confidence)
 
-        if accepted:
-            binary_confidence = float(np.clip(0.5 + 0.08 * separation, 0.0, 1.0))
+    if (
+        refined_eight_override
+        and binary_confidence is not None
+    ):
+        maximum_level = float(np.max(levels))
+        uniformity = (
+            float(np.min(levels)) / maximum_level
+            if maximum_level > 0.0
+            else 0.0
+        )
+        if np.all(levels >= active_threshold) and uniformity >= 0.70:
+            return 8, max(confidence, binary_confidence)
+
+    if legacy_binary_override:
+        if binary_confidence is not None:
             return int(binary_digit), max(confidence, binary_confidence)
 
     return baseline_digit, confidence
@@ -1579,6 +1636,7 @@ def decode_samples(
     minimum_confidence: float = 0.0,
     decimal_switch_penalty: float = 4.0,
     decimal_sequence_observer: DecimalSequenceObserver | None = None,
+    rds200_pattern_refinement: bool = False,
 ) -> list[DecodedSample]:
     darkness = np.full(
         (len(samples), len(profile.digit_boxes), 7), np.nan, dtype=float
@@ -1664,7 +1722,11 @@ def decode_samples(
                 else:
                     digit, confidence = decode_rds30_margin_digit(levels, patterns)
             else:
-                digit, confidence = decode_pattern_digit(digit_darkness, patterns)
+                digit, confidence = decode_pattern_digit(
+                    digit_darkness,
+                    patterns,
+                    rds200_pattern_refinement=rds200_pattern_refinement,
+                )
                 if digit is None:
                     digits = []
                     break

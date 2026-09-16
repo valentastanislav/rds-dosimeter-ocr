@@ -346,6 +346,15 @@ def parse_wrapper_args(
     )
 
     parser.add_argument(
+        "--rds200-pattern-refinement",
+        action="store_true",
+        help=(
+            "enable the experimental RDS-200 pattern-decoder "
+            "confidence/8 refinement"
+        ),
+    )
+
+    parser.add_argument(
         "--joint-spatial-confidence",
         type=float,
         default=None,
@@ -2216,6 +2225,32 @@ def main(
                 "an injected decode_samples callable."
             )
 
+        if (
+            wrapper_args.rds200_pattern_refinement
+            and profile.name != "rds200"
+        ):
+            raise RuntimeError(
+                "--rds200-pattern-refinement requires --profile rds200."
+            )
+
+        if (
+            wrapper_args.rds200_pattern_refinement
+            and wrapper_args.decoder_strategy != "default"
+        ):
+            raise RuntimeError(
+                "--rds200-pattern-refinement requires "
+                "--decoder-strategy default."
+            )
+
+        if (
+            wrapper_args.rds200_pattern_refinement
+            and decode_samples is not None
+        ):
+            raise RuntimeError(
+                "--rds200-pattern-refinement cannot be combined with "
+                "an injected decode_samples callable."
+            )
+
         fixed_app.validate_geometry_options(
             profile,
             fixed_extra.select_grid,
@@ -2523,12 +2558,26 @@ def main(
                     wrapper_args.joint_spatial_min_nine_margin
                 ),
             )
-        else:
-            selected_decode_samples = (
-                core.decode_samples
-                if decode_samples is None
-                else decode_samples
-            )
+        elif wrapper_args.rds200_pattern_refinement:
+            def selected_decode_samples(
+                samples,
+                in_profile,
+                filter_window,
+                decimal_places_override=None,
+                minimum_confidence=0.0,
+                decimal_switch_penalty=4.0,
+                decimal_sequence_observer=None,
+            ):
+                return core.decode_samples(
+                    samples,
+                    in_profile,
+                    filter_window,
+                    decimal_places_override=decimal_places_override,
+                    minimum_confidence=minimum_confidence,
+                    decimal_switch_penalty=decimal_switch_penalty,
+                    decimal_sequence_observer=decimal_sequence_observer,
+                    rds200_pattern_refinement=True,
+                )
 
         def decode_samples_with_decimal_observer(
             samples,
