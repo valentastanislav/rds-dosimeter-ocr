@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import replace
 
 import numpy as np
 
@@ -49,6 +50,25 @@ import dosimeter_get_values_flow_diag as diag
 # ======================================================================
 # Wrapper arguments
 # ======================================================================
+
+
+def parse_digit_x_offsets(
+    text: str,
+) -> tuple[int, int, int]:
+    try:
+        values = tuple(
+            int(value.strip())
+            for value in text.split(",")
+        )
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "--digit-x-offsets must contain three integers: DX1,DX2,DX3"
+        ) from exc
+    if len(values) != 3:
+        raise argparse.ArgumentTypeError(
+            "--digit-x-offsets must contain three integers: DX1,DX2,DX3"
+        )
+    return values
 
 
 def parse_wrapper_args(
@@ -120,6 +140,16 @@ def parse_wrapper_args(
         ),
     )
 
+    parser.add_argument(
+        "--digit-x-offsets",
+        type=parse_digit_x_offsets,
+        default=(0, 0, 0),
+        help=(
+            "per-digit integer horizontal segment-mask offsets "
+            "DX1,DX2,DX3 (default: 0,0,0)"
+        ),
+    )
+
     return parser.parse_known_args(
         argv
     )
@@ -182,6 +212,39 @@ def transform_polygon(
         points
     ).astype(
         np.int32
+    )
+
+
+def make_digit_segment_polygons(
+    polygons: dict[str, np.ndarray],
+    x_offsets: tuple[int, int, int],
+) -> tuple[dict[str, np.ndarray], ...]:
+    return tuple(
+        {
+            name: polygon
+            + np.asarray(
+                (x_offset, 0),
+                dtype=polygon.dtype,
+            )
+            for name, polygon in polygons.items()
+        }
+        for x_offset in x_offsets
+    )
+
+
+def make_digit_offset_profile(
+    profile: core.Profile,
+    polygons: dict[str, np.ndarray],
+    x_offsets: tuple[int, int, int],
+) -> core.Profile | None:
+    if not any(x_offsets):
+        return None
+    return replace(
+        profile,
+        digit_segment_polygons=make_digit_segment_polygons(
+            polygons,
+            x_offsets,
+        ),
     )
 
 
@@ -274,6 +337,12 @@ def main() -> int:
         in original_polygons.items()
     }
 
+    profile_override = make_digit_offset_profile(
+        profile,
+        transformed_polygons,
+        wrapper_args.digit_x_offsets,
+    )
+
     print(
         "Temporary RDS-200 tight-grid segment geometry:"
     )
@@ -319,6 +388,17 @@ def main() -> int:
             f"{wrapper_args.segment_x_shift:+.2f}"
         )
     )
+
+    if profile_override is not None:
+        print(
+            (
+                "  digit x offsets: "
+                + ",".join(
+                    f"{value:+d}"
+                    for value in wrapper_args.digit_x_offsets
+                )
+            )
+        )
 
     print()
 
@@ -372,7 +452,9 @@ def main() -> int:
     try:
 
         result = (
-            diag.main()
+            diag.main(
+                profile_override=profile_override
+            )
         )
 
     finally:
