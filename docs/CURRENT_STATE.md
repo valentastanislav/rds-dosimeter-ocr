@@ -1,14 +1,91 @@
 # Current development state
 
-## Goal
+## Goal and scope
 
-Read changing seven-segment LCD values from hand-held videos of RADOS dosimeters, with current external beta testing focused on the RDS-30.
+Read changing seven-segment LCD values from hand-held videos of RADOS dosimeters.
 
-Ground truth is used only for benchmarking and validation. It must not influence production geometry, decoding, confidence, or acceptance decisions.
+The shared production architecture is approximately:
 
-## Current public beta status
+```text
+flow
+  -> fixedgrid
+  -> ROI
+  -> core measurement / filtering / decoding
+```
 
-The repository is public and `main` contains the current RDS-30 beta pipeline plus independent-validation metadata.
+The current public beta remains focused on RDS-30. RDS-200 remains supported as a regression target and is also undergoing a separate OCR-quality experiment described below.
+
+Ground truth is evaluation-only. It must never influence production geometry, decoding, decimal selection, confidence, acceptance, expected ranges, or transition handling.
+
+## Manual initialization contract
+
+Manual once-per-video initialization is expected.
+
+`reference_box` is a padded axis-aligned carrier containing the complete physical LCD plus visible margin. Its edges are not physical LCD boundaries.
+
+`quad` is the four actual physical LCD corners inside `reference_box`, ordered:
+
+```text
+top-left -> top-right -> bottom-right -> bottom-left
+```
+
+For RDS-200, `grid` is a tight rectangle around all three large digits in the rectified display. Do not include the scale, `uSv/h`, or bezel. Decimal dots do not need to be included.
+
+For RDS-30, digit geometry is profile-owned and no manual grid is used.
+
+### Hard per-video geometry invariant
+
+`reference_time_s`, `reference_box`, `quad`, and (for RDS-200) `grid` are per-video initialization/calibration.
+
+In particular:
+
+- never copy `reference_box`, `quad`, or `grid` from one video to another;
+- select them independently from the image content of each video;
+- once selected for a canonical video, freeze and reuse that exact geometry for baseline/refined algorithm comparisons;
+- do not change geometry and OCR behavior simultaneously unless the experiment explicitly concerns initialization.
+
+The canonical frozen values belong in `tests/video_manifest.tsv`.
+
+## Geometry / debug invariants
+
+The successful stabilization model remains:
+
+1. choose a reference frame;
+2. detect static LK features outside changing LCD content;
+3. track sequentially frame-to-frame with pyramidal LK;
+4. estimate a RANSAC similarity transform;
+5. accumulate transforms relative to the reference frame;
+6. stabilize the full frame;
+7. crop the fixed `reference_box`;
+8. perspective-warp the physical-LCD `quad`;
+9. apply fixed digit geometry;
+10. cache the exact rectified display used by OCR.
+
+Debug images and diagnostics must use the cached main-pass display. Do not recompute geometry for debug output.
+
+## Canonical video roles
+
+The authoritative list and per-video initialization are in `tests/video_manifest.tsv`.
+
+RDS-200:
+
+```text
+IMG_0747.mov   Condition A   dev
+IMG_0744.mov   Condition A   verify
+IMG_1151.MOV   Condition B   cross_condition_regression
+```
+
+`IMG_0744.mov` is verification evidence, not a new tuning set.
+
+`IMG_1151.MOV` has been used extensively in historical development and is not a clean held-out video.
+
+RDS-30 roles remain recorded in the manifest.
+
+---
+
+# RDS-30 public beta
+
+## Frozen configuration
 
 The algorithmic RDS-30 freeze is tagged:
 
@@ -16,73 +93,17 @@ The algorithmic RDS-30 freeze is tagged:
 rds30-gi-weak9-2026-09-11
 ```
 
-The tag points to commit `7bc6fde`, with:
+at commit `7bc6fde`.
+
+Frozen behavior:
 
 ```text
-geometry emission: glyph-independent
-confidence threshold: 0.358
-weak-9 margin threshold: 0.400
+geometry emission:          glyph-independent
+confidence threshold:       0.358
+weak-9 margin threshold:    0.400
 ```
 
-The current `main` branch contains the same frozen algorithm plus later documentation and validation metadata.
-
-A historical pre-cleanup snapshot is preserved as:
-
-```text
-pre-cleanup-2026-09-07
-```
-
-pointing to commit `eb003e7`.
-
-## RDS-30 processing chain
-
-The current RDS-30 path is:
-
-```text
-video
-  -> manual reference display box
-  -> sequential pyramidal Lucas-Kanade optical flow
-  -> frame-to-frame RANSAC similarity transform
-  -> accumulated stabilization to the reference frame
-  -> fixed reference-box crop
-  -> fixed perspective rectification
-  -> profile-defined digit geometry
-  -> segment evidence measurement
-  -> temporal filtering
-  -> joint-spatial residual-geometry selection
-  -> digit decoding
-  -> confidence / weak-9 rejection
-  -> interval construction
-  -> diagnostics / output
-```
-
-The key design rule is that residual geometry must be selected independently of digit identity. The current beta therefore uses `glyph-independent` geometry emission rather than the older glyph-best score.
-
-## Manual geometry contract
-
-### Reference box
-
-The `reference_box` is a loose axis-aligned carrier rectangle containing the complete physical LCD/display plus a small visible margin.
-
-Its edges have no LCD-boundary meaning.
-
-### Quad
-
-The perspective `quad` is the four actual physical LCD corners inside the reference box, clicked in this order:
-
-```text
-top-left -> top-right -> bottom-right -> bottom-left
-```
-
-The quad follows the LCD boundary, not the digits, housing, or reference-box edge.
-
-### RDS-30 digit geometry
-
-RDS-30 does not require a manually selected digit grid. Digit positions and seven-segment geometry are part of the profile, including the possibly blank leading digit.
-
-## Frozen RDS-30 beta command
-
-Typical interactive run:
+Typical beta run:
 
 ```bash
 python3 dosimeter_get_values_flow.py my_video.MOV rds30_intervals.csv \
@@ -98,46 +119,13 @@ python3 dosimeter_get_values_flow.py my_video.MOV rds30_intervals.csv \
   --joint-spatial-diagnostics-dir rds30_diagnostics
 ```
 
-For external beta tests, do not tune the frozen thresholds after looking at the OCR result.
+Do not tune the frozen thresholds on an external validation video after inspecting its OCR output.
 
-## RDS-30 validation history
+## Independent RDS-30 validation
 
-Video roles are recorded in `tests/video_manifest.tsv`.
+`IMG_0751.MOV` is the first independent validation of the complete frozen RDS-30 configuration. Its ground truth was prepared before OCR, and geometry/decoder parameters were not tuned from the video.
 
-### Development / consumed videos
-
-`IMG_0754.MOV`
-- development video
-- corrected padded-carrier / physical-LCD-corner initialization
-
-`IMG_0753.MOV`
-- originally verification
-- later consumed during robustness and confidence-threshold development
-- no longer independent verification
-
-`IMG_1152.MOV`
-- originally held out
-- later consumed during geometry acceptance, cross-condition validation, and confidence-threshold analysis
-- not an independent held-out video
-
-`IMG_0748.MOV`
-- development video
-- used to diagnose glyph-driven residual-geometry selection and develop glyph-independent geometry emission
-- ground-truth interval 34 was corrected from a transcription error: the correct value is `78.50`, not `75.50`
-
-`IMG_0749.MOV`
-- initially attempted as frozen validation
-- exposed systematic low-margin `4 -> 9` errors
-- then consumed to develop the weak-9 margin guard
-- therefore not an independent validation video
-
-### Independent frozen validation
-
-`IMG_0751.MOV` is the first independent validation of the complete frozen RDS-30 configuration.
-
-Its ground truth was prepared before OCR. Geometry and decoder parameters were not tuned from this video.
-
-Result on stable samples:
+Stable-sample result:
 
 ```text
 stable samples:        1088
@@ -150,64 +138,29 @@ stable coverage:        99.91%
 MAE on accepted:         0
 ```
 
-This is evidence that the frozen configuration can generalize beyond the development set, but it is one independent video and must not be presented as a universal performance guarantee.
+This is evidence from one independent video, not a universal performance guarantee.
 
-The next useful test is an external video of the same RDS-30 instrument type under different recording conditions.
+The next useful RDS-30 test remains a genuinely new external video under different recording conditions with frozen decoder settings.
 
-## Why glyph-independent geometry is important
+---
 
-The older joint-spatial implementation selected residual geometry using the best legal glyph likelihood at each candidate offset. That creates a circular dependency: geometry can move toward a location that makes a different legal digit look more plausible.
+# RDS-200 historical regression invariant
 
-The current glyph-independent geometry emission uses only physical image evidence such as contrast, oriented-edge support, cross-edge penalty, and continuity. The geometry path is fixed first; only then are glyph probabilities and digit margins evaluated.
+The historical RDS-200 exact regression and the newer OCR experiment below are different things and must not be conflated.
 
-This separation is a core current invariant.
-
-## Weak-9 guard
-
-The RDS-30 LCD uses non-standard glyphs, including a `9` without the bottom segment.
-
-After `IMG_0749.MOV` exposed low-margin `4 -> 9` confusions, a conservative guard was added:
-
-```text
---joint-spatial-min-nine-margin 0.400
-```
-
-A sample is rejected when any decoded digit `9` has a glyph margin below this threshold. Other digits are unaffected.
-
-The threshold was frozen before the independent `IMG_0751.MOV` validation.
-
-## Confidence policy
-
-The beta decoder is deliberately conservative. Rejected samples are preferable to accepted wrong values.
-
-Therefore:
-
-- coverage below 100% is not automatically a failure
-- accepted accuracy is the primary reliability metric
-- a modest rejection fraction can be acceptable
-- external tests should report both coverage and wrong accepted values
-
-## Debug invariant
-
-`dosimeter_get_values_flow.py` caches the stabilized and perspective-rectified display used during the main decoding pass.
-
-Debug images and diagnostics must be generated from this exact cached main-pass display.
-
-Do not reintroduce a separate geometry or tracking pass for debug generation.
-
-## RDS-200 regression invariant
-
-RDS-200 remains supported and is treated as a regression invariant while RDS-30 development proceeds.
-
-The historical consensus baseline contains 331 raw samples. Current refactoring has preserved exact output parity:
+For behavior-preserving refactors, the historical committed baseline remains authoritative:
 
 ```text
 expected samples: 331
 actual samples:   331
-mismatching:        0
+required mismatches: 0
 ```
 
-The historical RDS-200 benchmark on stable evaluated samples remains approximately:
+Use `tests/compare_regression_baseline.py` and the committed baseline under `tests/baseline/`.
+
+Ground-truth accuracy does not replace this exact raw-output regression requirement.
+
+The older historical benchmark is approximately:
 
 ```text
 stable samples: 283
@@ -215,69 +168,379 @@ exact accuracy: 78.45%
 MAE:            ~0.10396
 ```
 
-RDS-200 still uses a manual digit grid and should not be silently changed while working on the RDS-30 path.
+---
 
-## Tests and behavior-preservation requirements
+# RDS-200 tight-segment / pattern-refinement experiment
 
-Changes to the current code should preserve:
+## Source status
 
-- default no-option behavior unless a new option is explicitly enabled
-- RDS-200 331/331 regression parity
-- exact cached-display debug invariant
-- RDS-30 profile geometry
-- ground-truth independence from production OCR
-- frozen RDS-30 beta parameters unless a new development cycle is explicitly started
-
-The default `glyph-best` mode is retained for behavior preservation when the new RDS-30 options are not requested.
-
-## Approaches not to reintroduce without new evidence
-
-Do not revisit these simply because the current beta is imperfect:
-
-- automatic ROI as a replacement for robust stabilization
-- manual ROI alone without tracking
-- perspective correction plus adaptive-y without tracking
-- fixed grid without tracking
-- ECC homography / rigid / translation-only registration
-- four-corner template tracking
-- digit-specific `6 -> 8` patches
-- hard-coded expected values or allowed dose ranges
-- hard-coded removal of early video time ranges
-- debug geometry recomputation
-- independent per-segment spatial mask search that chases boundaries
-- truth-glyph-margin joint registration as a physical geometry estimator
-- banning all `ty = +4`, all `ty = -4`, or all nonzero vertical residual states
-
-In particular, real data contain both correct and incorrect samples at nonzero residual-y states, so residual geometry cannot be filtered by a simple sign or nonzero-state rule.
-
-## Current next step
-
-The immediate development objective is not further tuning on the existing videos.
-
-The useful next step is external beta validation:
-
-1. use a new RDS-30 video under different conditions
-2. keep the frozen decoder settings unchanged
-3. record `reference_box` and `quad`
-4. retain raw output and `geometry.csv`
-5. if true values are available, record them independently before inspecting OCR output
-6. treat any new failure as validation evidence first, not as an automatic cue to tune on that same video
-
-## Conceptual architecture
-
-The long-term architecture remains:
+As of 2026-09-16, the tested opt-in flag
 
 ```text
-video input
-  -> geometry / stabilization
-  -> rectified display
-  -> digit geometry
-  -> segment measurement
-  -> temporal filtering
-  -> digit decoding
-  -> decimal decoding
-  -> interval construction
-  -> diagnostics / output
+--rds200-pattern-refinement
 ```
 
-Ground-truth evaluation remains independent of production OCR.
+is not present on repository `main`.
+
+The experiment was run from the local `dosimeter_get_values_flow_tightsegments.py` implementation. Treat the results below as validated local experiment state, not as already merged production behavior.
+
+Before merging or recreating the implementation, preserve default behavior and rerun the exact historical RDS-200 regression.
+
+## Frozen decoder / segment configuration
+
+The development choice was frozen on `IMG_0747.mov` before verification on `IMG_0744.mov` and cross-condition testing on `IMG_1151.MOV`.
+
+Common parameters:
+
+```text
+flow model:             similarity
+flow redetect every:    1
+segment y stretch:      1.45
+segment x stretch:      1.0
+segment x shift:        +4.0
+digit x offsets:        0,0,+3
+filter window:          1
+mode window:            1
+decimal places:         auto
+contrast:               auto
+OCR sample rate:        5 fps
+```
+
+The refined run differs from baseline only by adding:
+
+```text
+--rds200-pattern-refinement
+```
+
+All baseline/refined comparisons for a given video use identical frozen per-video geometry.
+
+## Frozen per-video initialization
+
+Exact values are stored in `tests/video_manifest.tsv`.
+
+For reference:
+
+```text
+IMG_0747.mov
+  reference_time_s = 20.0
+  reference_box    = 0.396296,0.433333,0.687037,0.542708
+  quad             = 0.042683,0.064789,0.951219,0.061972,0.965447,0.943662,0.042683,0.949296
+  grid             = 0.239351,0.455056,0.679513,0.792135
+
+IMG_0744.mov
+  reference_time_s = 16.0
+  reference_box    = 0.350000,0.340625,0.674074,0.463542
+  quad             = 0.038618,0.076056,0.957317,0.070423,0.963415,0.946479,0.044715,0.952113
+  grid             = 0.255578,0.463483,0.679513,0.789326
+
+IMG_1151.MOV
+  reference_time_s = 25.0
+  reference_box    = 0.279630,0.240625,0.712963,0.404167
+  quad             = 0.048780,0.092958,0.951219,0.081690,0.969512,0.940845,0.056911,0.957747
+  grid             = 0.245436,0.471910,0.677485,0.786517
+```
+
+These values are video-specific. Do not transfer them between videos.
+
+## Evaluation protocol
+
+Evaluator:
+
+```text
+tests/evaluate_dosimeter_ground_truth.py
+```
+
+Default transition guard:
+
+```text
++/- 0.400 s
+```
+
+Report at least:
+
+- evaluated stable samples;
+- recognized stable samples / coverage;
+- correct, wrong, and missing stable samples;
+- exact accuracy;
+- accuracy among recognized samples;
+- row-by-row status transitions between candidate algorithms.
+
+MAE is secondary for character OCR. A one-digit positional error can dominate MAE even when the character-level change is informative.
+
+## IMG_0747.mov — development
+
+Stable samples: `159`.
+
+Baseline (`digit3_xplus3`):
+
+```text
+recognized:               158 / 159 = 99.37%
+correct:                   153
+wrong:                       5
+missing:                     1
+overall exact accuracy:    96.23%
+accuracy when recognized:  96.84%
+```
+
+With pattern refinement:
+
+```text
+recognized:               159 / 159 = 100.00%
+correct:                   156
+wrong:                       3
+missing:                     0
+overall exact accuracy:    98.11%
+accuracy when recognized:  98.11%
+```
+
+Exact stable status transitions:
+
+```text
+correct -> correct: 153
+wrong   -> correct:   2
+wrong   -> wrong:     3
+missing -> correct:   1
+correct -> wrong:     0
+correct -> missing:   0
+```
+
+The refinement repaired the second-digit `4 -> 8` failure in the problematic `18.x` family.
+
+Remaining stable errors are a separate first-digit problem:
+
+```text
+t=35.2 s: truth 18.0 -> 38.0
+t=35.4 s: truth 18.0 -> 38.0
+t=36.8 s: truth 18.1 -> 98.1
+```
+
+Do not extend the current refinement merely to fix this separate failure mode without a new experiment.
+
+## IMG_0744.mov — same-condition verification
+
+Geometry was selected independently from this video before truth evaluation. No decoder tuning was performed on the verification result.
+
+Stable samples: `164`.
+
+Baseline:
+
+```text
+recognized:               145 / 164 = 88.41%
+correct:                   140
+wrong:                       5
+missing:                    19
+overall exact accuracy:    85.37%
+accuracy when recognized:  96.55%
+```
+
+With pattern refinement:
+
+```text
+recognized:               146 / 164 = 89.02%
+correct:                   141
+wrong:                       5
+missing:                    18
+overall exact accuracy:    85.98%
+accuracy when recognized:  96.58%
+```
+
+Exact stable status transitions:
+
+```text
+correct -> correct: 140
+wrong   -> wrong:     5
+missing -> missing:  18
+missing -> correct:   1
+correct -> wrong:     0
+correct -> missing:   0
+```
+
+Only one stable prediction changed: at `t=14.6 s`, `missing -> 33.8`, which is correct.
+
+Two prediction changes occurred inside the transition guard and do not affect stable accuracy:
+
+```text
+t=14.2 s: missing -> 33.8
+t=63.2 s: missing -> 67.6
+```
+
+The latter shows that refinement is not intrinsically monotonic outside stable evaluation regions.
+
+Known `IMG_0744` failure modes left untouched by this refinement include:
+
+- early `33.x/34.x -> 2.8x` value failures;
+- a long missing region for true `31.3`.
+
+Treat these as separate problems.
+
+## IMG_1151.MOV — cross-condition regression
+
+Geometry was reselected independently for this video.
+
+Tracking remained strong:
+
+```text
+frames:              331
+accepted flow steps: 329 / 330
+rejected flow steps:   1
+mean tracked points:  ~78
+mean RANSAC inliers:  ~77.8
+```
+
+### Automatic-decimal failure
+
+With `--decimal-places auto`, the decoder selected one decimal place where the truth uses two.
+
+Typical errors are therefore:
+
+```text
+truth 0.42 -> OCR 4.2
+truth 0.69 -> OCR 6.9
+```
+
+Consequently, the uncorrected evaluator reports `0.00%` exact accuracy for both baseline and refined runs.
+
+This is a decimal-state failure, not evidence that all digit recognition failed.
+
+Do not use ground truth or expected dose range to choose decimal position in production. Fix/test automatic decimal handling as a separate OCR experiment.
+
+### Digit/refinement comparison with decimal state analytically factored out
+
+For diagnostic analysis only, dividing the recognized OCR values by 10 isolates the digit result. This normalization is evaluation analysis, not production logic.
+
+Stable samples: `283`.
+
+Baseline after analytical decimal normalization:
+
+```text
+recognized:               257 / 283 = 90.81%
+correct:                   255
+wrong:                       2
+missing:                    26
+exact accuracy:            90.11%
+accuracy when recognized:  99.22%
+```
+
+Refined after analytical decimal normalization:
+
+```text
+recognized:               260 / 283 = 91.87%
+correct:                   258
+wrong:                       2
+missing:                    23
+exact accuracy:            91.17%
+accuracy when recognized:  99.23%
+```
+
+Only four predictions changed in the raw 331-frame comparison:
+
+```text
+t=19.6 s: missing -> 4.2   transition guard
+t=20.6 s: missing -> 4.8   stable; digit value corresponds to truth 0.48 after decimal normalization
+t=33.0 s: missing -> 5.4   stable; corresponds to truth 0.54
+t=38.4 s: missing -> 5.6   stable; corresponds to truth 0.56
+```
+
+The two remaining stable digit errors are unchanged in both runs:
+
+```text
+t=24.0 s: truth 0.61 -> OCR 16.1
+t=24.8 s: truth 0.61 -> OCR 16.1
+```
+
+After the decimal factor is separated, these are first-digit errors (`1.61` vs `0.61`).
+
+`IMG_1151.MOV` is a cross-condition regression case, not a clean held-out test.
+
+## Confidence side effect of pattern refinement
+
+The current refinement affects confidence much more broadly than it changes decoded values.
+
+Observed confidence changes:
+
+```text
+IMG_0747: 117 / 332 frames changed; 117 up, 0 down
+IMG_0744: 181 / 324 frames changed; 181 up, 0 down
+IMG_1151: 159 / 331 frames changed; 159 up, 0 down
+```
+
+On stable samples whose prediction itself did not change:
+
+```text
+IMG_0747: 55 confidence changes; median +0.0856; mean +0.1063
+IMG_0744: 89 confidence changes; median +0.0787; mean +0.0851
+IMG_1151: 127 confidence changes; median +0.0685; mean +0.0943
+```
+
+No measured confidence change was downward.
+
+This did not create a problem with `--mode-window 1`, but it is a real semantic side effect. Re-evaluate it before using the confidence values for stronger downstream voting, rejection, or weighting.
+
+## RDS-200 experiment conclusion / freeze
+
+Across the three-video experiment, no stable digit regression attributable to pattern refinement was observed:
+
+```text
+IMG_0747 dev:      +3 correct, wrong 5 -> 3, missing 1 -> 0
+IMG_0744 verify:   +1 correct, wrong unchanged, missing 19 -> 18
+IMG_1151 cross:    +3 digit-correct after decimal normalization,
+                   wrong unchanged, missing 26 -> 23
+```
+
+The development choice is therefore frozen for this experiment.
+
+Do not tune the refinement further on `IMG_0744.mov` or `IMG_1151.MOV`.
+
+Separate future work items are:
+
+1. RDS-200 automatic decimal handling under cross-condition data;
+2. remaining first-digit failure modes;
+3. confidence semantics if confidence becomes a downstream decision variable;
+4. merging/reimplementing the opt-in refinement on top of current `main` while preserving default historical regression behavior.
+
+---
+
+# Testing / development discipline
+
+Keep these concerns separate:
+
+- behavior-preserving refactor;
+- geometry/stabilization experiment;
+- OCR-quality experiment;
+- decimal-handling experiment;
+- profile-generalization change.
+
+For behavior-preserving code changes, normally require:
+
+```text
+py_compile
+git diff --check
+exact historical RDS-200 regression
+relevant diagnostics / debug comparison
+git status
+```
+
+Never compensate for poor geometry by tuning decoder rules.
+
+Do not reintroduce without new evidence:
+
+- expected-value or allowed-range constraints;
+- video-specific correction tables;
+- per-frame manual geometry;
+- ECC/homography/template tracking approaches already rejected;
+- digit-specific one-off patches;
+- debug geometry recomputation.
+
+## Current next steps
+
+RDS-30:
+
+- external beta validation on a genuinely new video with frozen parameters.
+
+RDS-200:
+
+- keep the 2026-09-16 pattern-refinement experiment frozen;
+- treat `IMG_0744.mov` as consumed verification evidence, not a tuning set;
+- treat `IMG_1151.MOV` as cross-condition regression, not held-out;
+- investigate automatic decimal selection separately before interpreting raw cross-condition exact-value accuracy;
+- if the refinement is to be merged, first port it cleanly to current `main`, preserve default behavior, and rerun the exact historical regression plus the frozen three-video OCR comparison.
