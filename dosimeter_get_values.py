@@ -101,6 +101,7 @@ class Profile:
     aux_segment_percentile: float | None = None
     hybrid_pattern_margin: float = 0.10
     leading_blank_threshold: float | None = None
+    digit_segment_polygons: tuple[dict[str, np.ndarray], ...] | None = None
 
 
 DisplayFinder = Callable[
@@ -980,11 +981,19 @@ def find_display_crop(
     # No reliable display yet.
     return None, previous_box
 
-def make_segment_masks(profile: Profile) -> tuple[np.ndarray, ...]:
+def make_segment_masks(
+    profile: Profile,
+    digit_index: int | None = None,
+) -> tuple[np.ndarray, ...]:
+    polygons = (
+        profile.segment_polygons
+        if digit_index is None or profile.digit_segment_polygons is None
+        else profile.digit_segment_polygons[digit_index]
+    )
     masks: list[np.ndarray] = []
     for name in SEGMENT_ORDER:
         mask = np.zeros((130, 65), dtype=np.uint8)
-        cv2.fillPoly(mask, [profile.segment_polygons[name]], 255)
+        cv2.fillPoly(mask, [polygons[name]], 255)
         masks.append(mask.astype(bool))
     return tuple(masks)
 

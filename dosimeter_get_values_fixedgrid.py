@@ -551,13 +551,15 @@ def make_profile_geometry_fixed_profile(
 
 def make_local_masks(
     profile: core.Profile,
+    digit_index: int | None = None,
 ) -> tuple[
     tuple[np.ndarray, ...],
     tuple[np.ndarray, ...],
 ]:
     segment_masks = (
         core.make_segment_masks(
-            profile
+            profile,
+            digit_index=digit_index,
         )
     )
 
@@ -624,10 +626,10 @@ def local_darkness(
     profile: core.Profile,
     config: core.FixedGridMeasurementConfig,
 ) -> np.ndarray:
-    segment_masks, rings = (
-        make_local_masks(
-            profile
-        )
+    shared_masks = (
+        make_local_masks(profile)
+        if profile.digit_segment_polygons is None
+        else None
     )
 
     result = np.full(
@@ -642,6 +644,14 @@ def local_darkness(
     for digit_index, patch in enumerate(
         patches
     ):
+        segment_masks, rings = (
+            shared_masks
+            if shared_masks is not None
+            else make_local_masks(
+                profile,
+                digit_index=digit_index,
+            )
+        )
         for segment_index, (
             segment_mask,
             ring_mask,

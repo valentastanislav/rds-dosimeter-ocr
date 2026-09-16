@@ -897,12 +897,16 @@ def restore_decode_hooks(
 # ======================================================================
 
 
-def main() -> int:
+def main(
+    profile_override: core.Profile | None = None,
+) -> int:
 
     CAPTURES.clear()
 
     profile_name = (
-        get_argument(
+        profile_override.name
+        if profile_override is not None
+        else get_argument(
             "--profile",
             "rds200",
         )
@@ -921,9 +925,13 @@ def main() -> int:
     ):
 
         sample_fps = float(
-            core.PROFILES[
-                profile_name
-            ].default_sample_fps
+            (
+                core.PROFILES[
+                    profile_name
+                ]
+                if profile_override is None
+                else profile_override
+            ).default_sample_fps
         )
 
     else:
@@ -939,7 +947,9 @@ def main() -> int:
     try:
 
         result = (
-            flow.main()
+            flow.main(
+                profile_override=profile_override
+            )
         )
 
     finally:
