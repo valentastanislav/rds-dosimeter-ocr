@@ -112,6 +112,7 @@ def capturing_decode_samples(
     decimal_sequence_observer: (
         core.DecimalSequenceObserver | None
     ) = None,
+    rds200_pattern_refinement: bool = False,
 ):
 
     raw = (
@@ -161,6 +162,9 @@ def capturing_decode_samples(
         ),
         decimal_sequence_observer=(
             decimal_sequence_observer
+        ),
+        rds200_pattern_refinement=(
+            rds200_pattern_refinement
         ),
     )
 

@@ -125,6 +125,109 @@ FLOW_CLI_USAGE = (
     "<video file> <output file> [options]"
 )
 
+FLOW_CLI_HELP = """\
+usage: python3 dosimeter_get_values_flow.py <video file> <output file> [options]
+
+Primary optical-flow OCR pipeline for RADOS RDS-30 and RDS-200 videos.
+
+Quick start — RDS-30 beta
+  python3 dosimeter_get_values_flow.py VIDEO.MOV intervals.csv \\
+    --profile rds30 \\
+    --track-time 20.0 \\
+    --select-reference-box \\
+    --select-quad \\
+    --decoder-strategy rds30-joint-spatial \\
+    --joint-spatial-geometry-emission glyph-independent \\
+    --joint-spatial-confidence 0.358 \\
+    --joint-spatial-min-nine-margin 0.400 \\
+    --raw-output raw.csv
+
+Quick start — RDS-200 first run
+  python3 dosimeter_get_values_flow.py VIDEO.MOV intervals.csv \\
+    --profile rds200 \\
+    --track-time 20.0 \\
+    --select-reference-box \\
+    --select-quad \\
+    --select-grid \\
+    --raw-output raw.csv
+
+Manual geometry
+  --track-time SECONDS
+      Reference frame used to define geometry.
+
+  --select-reference-box
+      Interactively select a loose box around the complete physical display.
+
+  --reference-box x1,y1,x2,y2
+      Reuse a previously selected reference box.
+
+  --select-quad
+      Interactively select the four physical LCD corners.
+
+  --quad x1,y1,x2,y2,x3,y3,x4,y4
+      Reuse a previously selected perspective quad.
+
+  --select-grid
+      Interactively select the RDS-200 digit grid.
+
+  --grid x1,y1,x2,y2
+      Reuse a previously selected RDS-200 digit grid.
+
+  Geometry is video-specific. Do not reuse reference-box, quad, or RDS-200
+  grid values for a different video without verifying them.
+  RDS-30 uses profile-defined digit geometry and does not use --grid.
+
+RDS-30 beta decoder
+  --decoder-strategy rds30-joint-spatial
+  --joint-spatial-geometry-emission {glyph-best,glyph-independent}
+  --joint-spatial-confidence VALUE
+  --joint-spatial-min-nine-margin VALUE
+  --joint-spatial-diagnostics-dir DIR
+  --joint-spatial-preview-frame FRAME_INDEX
+
+RDS-200 decoder
+  --decoder-strategy default
+      Historical RDS-200 decoder.
+
+  --rds200-pattern-refinement
+      Enable the opt-in RDS-200 binary-pattern refinement. It may strengthen
+      confidence for exact pattern matches and recover uniformly active digit 8.
+      Disabled by default.
+
+General decoding
+  --profile {rds200,rds30}
+  --decimal-places {auto,0,1,2,3}
+  --contrast {auto,none,clahe}
+  --min-confidence VALUE
+  --filter-window N
+  --mode-window N
+  --sample-fps VALUE
+  --processing-width PIXELS
+
+Output
+  --raw-output FILE
+      Write every decoded sample before interval merging.
+
+  --summary FILE
+      Write summary JSON.
+
+  --debug-dir DIR
+      Write interval debug images.
+
+Tracking
+  --flow-max-translation PIXELS
+  --flow-max-rotation DEGREES
+  --flow-min-scale VALUE
+  --flow-max-scale VALUE
+  --flow-min-inliers N
+  --flow-redetect-every N
+
+  -h, --help
+      Show this help and exit.
+
+See README.md for setup, detailed geometry instructions, and beta-test guidance.
+"""
+
 
 # ======================================================================
 # Manual reference-display box
@@ -342,6 +445,15 @@ def parse_wrapper_args(
         help=(
             "decoder strategy applied to cached main-pass displays "
             "(default: default)"
+        ),
+    )
+
+    parser.add_argument(
+        "--rds200-pattern-refinement",
+        action="store_true",
+        help=(
+            "enable the experimental RDS-200 pattern-decoder "
+            "confidence/8 refinement"
         ),
     )
 
@@ -2087,6 +2199,10 @@ def main(
         else list(argv)
     )
 
+    if "-h" in selected_argv or "--help" in selected_argv:
+        print(FLOW_CLI_HELP)
+        return 0
+
     wrapper_args, remaining = (
         parse_wrapper_args(
             selected_argv
@@ -2213,6 +2329,32 @@ def main(
         ):
             raise RuntimeError(
                 "The joint-spatial CLI strategy cannot be combined with "
+                "an injected decode_samples callable."
+            )
+
+        if (
+            wrapper_args.rds200_pattern_refinement
+            and profile.name != "rds200"
+        ):
+            raise RuntimeError(
+                "--rds200-pattern-refinement requires --profile rds200."
+            )
+
+        if (
+            wrapper_args.rds200_pattern_refinement
+            and wrapper_args.decoder_strategy != "default"
+        ):
+            raise RuntimeError(
+                "--rds200-pattern-refinement requires "
+                "--decoder-strategy default."
+            )
+
+        if (
+            wrapper_args.rds200_pattern_refinement
+            and decode_samples is not None
+        ):
+            raise RuntimeError(
+                "--rds200-pattern-refinement cannot be combined with "
                 "an injected decode_samples callable."
             )
 
@@ -2523,12 +2665,26 @@ def main(
                     wrapper_args.joint_spatial_min_nine_margin
                 ),
             )
-        else:
-            selected_decode_samples = (
-                core.decode_samples
-                if decode_samples is None
-                else decode_samples
-            )
+        elif wrapper_args.rds200_pattern_refinement:
+            def selected_decode_samples(
+                samples,
+                in_profile,
+                filter_window,
+                decimal_places_override=None,
+                minimum_confidence=0.0,
+                decimal_switch_penalty=4.0,
+                decimal_sequence_observer=None,
+            ):
+                return core.decode_samples(
+                    samples,
+                    in_profile,
+                    filter_window,
+                    decimal_places_override=decimal_places_override,
+                    minimum_confidence=minimum_confidence,
+                    decimal_switch_penalty=decimal_switch_penalty,
+                    decimal_sequence_observer=decimal_sequence_observer,
+                    rds200_pattern_refinement=True,
+                )
 
         def decode_samples_with_decimal_observer(
             samples,
