@@ -125,6 +125,109 @@ FLOW_CLI_USAGE = (
     "<video file> <output file> [options]"
 )
 
+FLOW_CLI_HELP = """\
+usage: python3 dosimeter_get_values_flow.py <video file> <output file> [options]
+
+Primary optical-flow OCR pipeline for RADOS RDS-30 and RDS-200 videos.
+
+Quick start — RDS-30 beta
+  python3 dosimeter_get_values_flow.py VIDEO.MOV intervals.csv \\
+    --profile rds30 \\
+    --track-time 20.0 \\
+    --select-reference-box \\
+    --select-quad \\
+    --decoder-strategy rds30-joint-spatial \\
+    --joint-spatial-geometry-emission glyph-independent \\
+    --joint-spatial-confidence 0.358 \\
+    --joint-spatial-min-nine-margin 0.400 \\
+    --raw-output raw.csv
+
+Quick start — RDS-200 first run
+  python3 dosimeter_get_values_flow.py VIDEO.MOV intervals.csv \\
+    --profile rds200 \\
+    --track-time 20.0 \\
+    --select-reference-box \\
+    --select-quad \\
+    --select-grid \\
+    --raw-output raw.csv
+
+Manual geometry
+  --track-time SECONDS
+      Reference frame used to define geometry.
+
+  --select-reference-box
+      Interactively select a loose box around the complete physical display.
+
+  --reference-box x1,y1,x2,y2
+      Reuse a previously selected reference box.
+
+  --select-quad
+      Interactively select the four physical LCD corners.
+
+  --quad x1,y1,x2,y2,x3,y3,x4,y4
+      Reuse a previously selected perspective quad.
+
+  --select-grid
+      Interactively select the RDS-200 digit grid.
+
+  --grid x1,y1,x2,y2
+      Reuse a previously selected RDS-200 digit grid.
+
+  Geometry is video-specific. Do not reuse reference-box, quad, or RDS-200
+  grid values for a different video without verifying them.
+  RDS-30 uses profile-defined digit geometry and does not use --grid.
+
+RDS-30 beta decoder
+  --decoder-strategy rds30-joint-spatial
+  --joint-spatial-geometry-emission {glyph-best,glyph-independent}
+  --joint-spatial-confidence VALUE
+  --joint-spatial-min-nine-margin VALUE
+  --joint-spatial-diagnostics-dir DIR
+  --joint-spatial-preview-frame FRAME_INDEX
+
+RDS-200 decoder
+  --decoder-strategy default
+      Historical RDS-200 decoder.
+
+  --rds200-pattern-refinement
+      Enable the opt-in RDS-200 binary-pattern refinement. It may strengthen
+      confidence for exact pattern matches and recover uniformly active digit 8.
+      Disabled by default.
+
+General decoding
+  --profile {rds200,rds30}
+  --decimal-places {auto,0,1,2,3}
+  --contrast {auto,none,clahe}
+  --min-confidence VALUE
+  --filter-window N
+  --mode-window N
+  --sample-fps VALUE
+  --processing-width PIXELS
+
+Output
+  --raw-output FILE
+      Write every decoded sample before interval merging.
+
+  --summary FILE
+      Write summary JSON.
+
+  --debug-dir DIR
+      Write interval debug images.
+
+Tracking
+  --flow-max-translation PIXELS
+  --flow-max-rotation DEGREES
+  --flow-min-scale VALUE
+  --flow-max-scale VALUE
+  --flow-min-inliers N
+  --flow-redetect-every N
+
+  -h, --help
+      Show this help and exit.
+
+See README.md for setup, detailed geometry instructions, and beta-test guidance.
+"""
+
 
 # ======================================================================
 # Manual reference-display box
@@ -2095,6 +2198,10 @@ def main(
         if argv is None
         else list(argv)
     )
+
+    if "-h" in selected_argv or "--help" in selected_argv:
+        print(FLOW_CLI_HELP)
+        return 0
 
     wrapper_args, remaining = (
         parse_wrapper_args(
