@@ -136,10 +136,6 @@ Quick start — RDS-30 beta
     --track-time 20.0 \\
     --select-reference-box \\
     --select-quad \\
-    --decoder-strategy rds30-joint-spatial \\
-    --joint-spatial-geometry-emission glyph-independent \\
-    --joint-spatial-confidence 0.358 \\
-    --joint-spatial-min-nine-margin 0.400 \\
     --raw-output raw.csv
 
 Quick start — RDS-200 first run
@@ -178,7 +174,16 @@ Manual geometry
   RDS-30 uses profile-defined digit geometry and does not use --grid.
 
 RDS-30 beta decoder
-  --decoder-strategy rds30-joint-spatial
+  With --profile rds30, the validated beta configuration is automatic:
+    decoder strategy:        rds30-joint-spatial
+    geometry emission:       glyph-independent
+    confidence threshold:    0.358
+    minimum nine margin:     0.400
+
+  Explicit command-line values override these profile defaults.
+  Use --decoder-strategy default to request the historical decoder.
+
+  --decoder-strategy {default,rds30-joint-spatial}
   --joint-spatial-geometry-emission {glyph-best,glyph-independent}
   --joint-spatial-confidence VALUE
   --joint-spatial-min-nine-margin VALUE
@@ -441,10 +446,10 @@ def parse_wrapper_args(
             "default",
             "rds30-joint-spatial",
         ),
-        default="default",
+        default=None,
         help=(
             "decoder strategy applied to cached main-pass displays "
-            "(default: default)"
+            "(default: profile-dependent)"
         ),
     )
 
@@ -483,10 +488,10 @@ def parse_wrapper_args(
             "glyph-best",
             "glyph-independent",
         ),
-        default="glyph-best",
+        default=None,
         help=(
-            "geometry Viterbi emission for the opt-in RDS-30 "
-            "joint-spatial decoder (default: glyph-best)"
+            "geometry Viterbi emission for the RDS-30 joint-spatial "
+            "decoder (default: profile-dependent)"
         ),
     )
 
@@ -515,6 +520,45 @@ def parse_wrapper_args(
     return parser.parse_known_args(
         argv
     )
+
+
+RDS30_DEFAULT_DECODER_STRATEGY = "rds30-joint-spatial"
+RDS30_DEFAULT_GEOMETRY_EMISSION = "glyph-independent"
+RDS30_DEFAULT_CONFIDENCE = 0.358
+RDS30_DEFAULT_MIN_NINE_MARGIN = 0.400
+
+
+def apply_profile_decoder_defaults(
+    wrapper_args: argparse.Namespace,
+    profile: core.Profile,
+) -> None:
+    """Resolve profile-specific decoder defaults without overriding CLI values."""
+
+    if wrapper_args.decoder_strategy is None:
+        wrapper_args.decoder_strategy = (
+            RDS30_DEFAULT_DECODER_STRATEGY
+            if profile.name == "rds30"
+            else "default"
+        )
+
+    if wrapper_args.joint_spatial_geometry_emission is None:
+        wrapper_args.joint_spatial_geometry_emission = (
+            RDS30_DEFAULT_GEOMETRY_EMISSION
+            if profile.name == "rds30"
+            else "glyph-best"
+        )
+
+    if (
+        profile.name == "rds30"
+        and wrapper_args.decoder_strategy == RDS30_DEFAULT_DECODER_STRATEGY
+    ):
+        if wrapper_args.joint_spatial_confidence is None:
+            wrapper_args.joint_spatial_confidence = RDS30_DEFAULT_CONFIDENCE
+
+        if wrapper_args.joint_spatial_min_nine_margin is None:
+            wrapper_args.joint_spatial_min_nine_margin = (
+                RDS30_DEFAULT_MIN_NINE_MARGIN
+            )
 
 
 # ======================================================================
@@ -2292,6 +2336,11 @@ def main(
             ]
             if profile_override is None
             else profile_override
+        )
+
+        apply_profile_decoder_defaults(
+            wrapper_args,
+            profile,
         )
 
         if (
