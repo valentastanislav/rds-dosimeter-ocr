@@ -117,65 +117,71 @@ class Rds200GridRefinementSweepTest(unittest.TestCase):
 
     def test_ranking_is_confidence_first_and_deterministic(self) -> None:
         base_grid = (0.2, 0.3, 0.8, 0.9)
-        base = GridCandidate(0, 0, 0, 0, base_grid)
-        shifted = GridCandidate(1, 0, 0, 0, base_grid)
-        farther = GridCandidate(2, 0, 0, 0, base_grid)
-
-        higher_mean = metrics(
-            farther,
-            mean_confidence=0.91,
-            median_confidence=0.80,
-            recognized_samples=8,
-            median_margin=1.0,
-        )
-        higher_median = metrics(
-            shifted,
-            mean_confidence=0.90,
-            median_confidence=0.95,
-            recognized_samples=8,
-            median_margin=1.0,
-        )
-        more_recognized = metrics(
-            base,
-            mean_confidence=0.90,
-            median_confidence=0.95,
-            recognized_samples=9,
-            median_margin=1.0,
-        )
-        higher_margin = metrics(
-            farther,
-            mean_confidence=0.90,
-            median_confidence=0.95,
-            recognized_samples=9,
-            median_margin=2.0,
-        )
-        least_perturbed = metrics(
-            base,
-            mean_confidence=0.90,
-            median_confidence=0.95,
-            recognized_samples=9,
-            median_margin=2.0,
-        )
+        mean_winner = GridCandidate(2, 2, 2, 2, base_grid)
+        median_winner = GridCandidate(2, 2, 2, 1, base_grid)
+        recognized_winner = GridCandidate(2, 2, 1, 1, base_grid)
+        margin_winner = GridCandidate(2, 1, 1, 1, base_grid)
+        perturbation_winner = GridCandidate(0, 0, 0, 0, base_grid)
+        lower_recognized = GridCandidate(1, 1, 1, 1, base_grid)
 
         values = [
-            higher_median,
-            more_recognized,
-            higher_margin,
-            least_perturbed,
-            higher_mean,
+            metrics(
+                mean_winner,
+                mean_confidence=0.91,
+                median_confidence=0.80,
+                recognized_samples=8,
+                median_margin=1.0,
+            ),
+            metrics(
+                median_winner,
+                mean_confidence=0.90,
+                median_confidence=0.96,
+                recognized_samples=8,
+                median_margin=1.0,
+            ),
+            metrics(
+                recognized_winner,
+                mean_confidence=0.90,
+                median_confidence=0.95,
+                recognized_samples=9,
+                median_margin=1.0,
+            ),
+            metrics(
+                margin_winner,
+                mean_confidence=0.90,
+                median_confidence=0.95,
+                recognized_samples=9,
+                median_margin=2.0,
+            ),
+            metrics(
+                perturbation_winner,
+                mean_confidence=0.90,
+                median_confidence=0.95,
+                recognized_samples=9,
+                median_margin=2.0,
+            ),
+            metrics(
+                lower_recognized,
+                mean_confidence=0.90,
+                median_confidence=0.95,
+                recognized_samples=8,
+                median_margin=100.0,
+            ),
         ]
+
         first = rank_candidates(values)
         second = rank_candidates(list(reversed(values)))
+        expected = [
+            mean_winner,
+            median_winner,
+            perturbation_winner,
+            margin_winner,
+            recognized_winner,
+            lower_recognized,
+        ]
 
-        self.assertEqual(
-            [item.candidate for item in first],
-            [item.candidate for item in second],
-        )
-        self.assertIs(first[0].candidate, higher_mean.candidate)
-        self.assertIs(first[1].candidate, least_perturbed.candidate)
-        self.assertIs(first[2].candidate, higher_margin.candidate)
-        self.assertIs(first[3].candidate, more_recognized.candidate)
-        self.assertIs(first[4].candidate, higher_median.candidate)
+        self.assertEqual([item.candidate for item in first], expected)
+        self.assertEqual([item.candidate for item in second], expected)
 
     def test_profile_and_original_polygons_are_not_mutated(self) -> None:
         original = core.PROFILES["rds200"]
