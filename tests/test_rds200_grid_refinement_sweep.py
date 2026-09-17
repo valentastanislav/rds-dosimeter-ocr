@@ -22,10 +22,13 @@ from tests.rds200_grid_refinement_sweep import (
 
 def metrics(
     candidate: GridCandidate,
-    recognized_samples: int,
-    p10: float,
-    median: float,
-    recognized_digits: int,
+    *,
+    mean_confidence: float = 0.5,
+    median_confidence: float = 0.5,
+    recognized_samples: int = 10,
+    median_margin: float = 7.0,
+    recognized_digits: int = 30,
+    p10: float = 4.0,
 ) -> CandidateMetrics:
     return CandidateMetrics(
         candidate=candidate,
@@ -39,19 +42,19 @@ def metrics(
         ambiguous_digits=30 - recognized_digits,
         ambiguous_digit_fraction=(30 - recognized_digits) / 30,
         p10_min_margin=p10,
-        median_min_margin=median,
-        mean_min_margin=median,
-        mean_digit_confidence=0.5,
-        median_digit_confidence=0.5,
+        median_min_margin=median_margin,
+        mean_min_margin=median_margin,
+        mean_digit_confidence=mean_confidence,
+        median_digit_confidence=median_confidence,
         recognized_digit1=10,
         recognized_digit2=10,
         recognized_digit3=recognized_digits - 20,
         p10_margin_digit1=p10,
         p10_margin_digit2=p10,
         p10_margin_digit3=p10,
-        median_confidence_digit1=0.5,
-        median_confidence_digit2=0.5,
-        median_confidence_digit3=0.5,
+        median_confidence_digit1=median_confidence,
+        median_confidence_digit2=median_confidence,
+        median_confidence_digit3=median_confidence,
         evaluation_seconds=0.0,
     )
 
@@ -112,25 +115,67 @@ class Rds200GridRefinementSweepTest(unittest.TestCase):
             self.assertTrue(0.0 <= x1 < x2 <= 1.0)
             self.assertTrue(0.0 <= y1 < y2 <= 1.0)
 
-    def test_ranking_is_deterministic_and_lexicographic(self) -> None:
+    def test_ranking_is_confidence_first_and_deterministic(self) -> None:
         base_grid = (0.2, 0.3, 0.8, 0.9)
         base = GridCandidate(0, 0, 0, 0, base_grid)
         shifted = GridCandidate(1, 0, 0, 0, base_grid)
-        lower_coverage = GridCandidate(-1, 0, 0, 0, base_grid)
-        values = [
-            metrics(shifted, 10, 4.0, 7.0, 30),
-            metrics(lower_coverage, 9, 100.0, 100.0, 30),
-            metrics(base, 10, 4.0, 7.0, 30),
-        ]
+        farther = GridCandidate(2, 0, 0, 0, base_grid)
 
+        higher_mean = metrics(
+            farther,
+            mean_confidence=0.91,
+            median_confidence=0.80,
+            recognized_samples=8,
+            median_margin=1.0,
+        )
+        higher_median = metrics(
+            shifted,
+            mean_confidence=0.90,
+            median_confidence=0.95,
+            recognized_samples=8,
+            median_margin=1.0,
+        )
+        more_recognized = metrics(
+            base,
+            mean_confidence=0.90,
+            median_confidence=0.95,
+            recognized_samples=9,
+            median_margin=1.0,
+        )
+        higher_margin = metrics(
+            farther,
+            mean_confidence=0.90,
+            median_confidence=0.95,
+            recognized_samples=9,
+            median_margin=2.0,
+        )
+        least_perturbed = metrics(
+            base,
+            mean_confidence=0.90,
+            median_confidence=0.95,
+            recognized_samples=9,
+            median_margin=2.0,
+        )
+
+        values = [
+            higher_median,
+            more_recognized,
+            higher_margin,
+            least_perturbed,
+            higher_mean,
+        ]
         first = rank_candidates(values)
         second = rank_candidates(list(reversed(values)))
-        first_offsets = [item.candidate.perturbation for item in first]
-        second_offsets = [item.candidate.perturbation for item in second]
 
-        self.assertEqual(first_offsets, second_offsets)
-        self.assertEqual(first[0].candidate, base)
-        self.assertEqual(first[-1].candidate, lower_coverage)
+        self.assertEqual(
+            [item.candidate for item in first],
+            [item.candidate for item in second],
+        )
+        self.assertIs(first[0].candidate, higher_mean.candidate)
+        self.assertIs(first[1].candidate, least_perturbed.candidate)
+        self.assertIs(first[2].candidate, higher_margin.candidate)
+        self.assertIs(first[3].candidate, more_recognized.candidate)
+        self.assertIs(first[4].candidate, higher_median.candidate)
 
     def test_profile_and_original_polygons_are_not_mutated(self) -> None:
         original = core.PROFILES["rds200"]
