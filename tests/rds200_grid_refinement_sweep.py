@@ -7,13 +7,11 @@ generation and ranking use no expected values or ground-truth data.
 
 The experimental ranking is lexicographic, in this order:
 
-1. recognized complete samples (descending),
-2. p10 complete-sample minimum pattern margin (descending),
-3. median complete-sample minimum pattern margin (descending),
-4. recognized individual digits (descending),
-5. median decoder confidence (descending),
-6. mean decoder confidence (descending),
-7. total absolute edge perturbation (ascending), then edge offsets.
+1. mean decoder confidence (descending),
+2. median decoder confidence (descending),
+3. recognized complete samples (descending),
+4. median complete-sample minimum pattern margin (descending),
+5. total absolute edge perturbation (ascending), then edge offsets.
 
 The final tie-breakers prefer the least perturbed geometry, not any known
 displayed value.  All component measurements are retained in the CSV.
@@ -311,12 +309,10 @@ def _rank_value(value: float) -> float:
 def ranking_key(metrics: CandidateMetrics) -> tuple[float | int, ...]:
     candidate = metrics.candidate
     return (
-        -metrics.recognized_samples,
-        -_rank_value(metrics.p10_min_margin),
-        -_rank_value(metrics.median_min_margin),
-        -metrics.recognized_digits,
-        -_rank_value(metrics.median_digit_confidence),
         -_rank_value(metrics.mean_digit_confidence),
+        -_rank_value(metrics.median_digit_confidence),
+        -metrics.recognized_samples,
+        -_rank_value(metrics.median_min_margin),
         candidate.perturbation,
         candidate.dx1,
         candidate.dy1,
@@ -381,12 +377,11 @@ def write_candidate_csv(path: Path, ranked: Sequence[CandidateMetrics]) -> None:
             candidate = item.candidate
             grid = candidate.grid
             score_tuple = (
-                f"{item.recognized_samples}|"
-                f"{_format_float(item.p10_min_margin)}|"
-                f"{_format_float(item.median_min_margin)}|"
-                f"{item.recognized_digits}|"
+                f"{_format_float(item.mean_digit_confidence)}|"
                 f"{_format_float(item.median_digit_confidence)}|"
-                f"{_format_float(item.mean_digit_confidence)}"
+                f"{item.recognized_samples}|"
+                f"{_format_float(item.median_min_margin)}|"
+                f"{candidate.perturbation}"
             )
             writer.writerow(
                 {
@@ -555,21 +550,24 @@ def print_summary(
     print(f"  output CSV            : {output_csv}")
     print(f"  elapsed               : {elapsed:.2f} s")
     print(
-        "  ranking               : recognized samples, p10/median minimum "
-        "margin, recognized digits, confidence; then least perturbation"
+        "  ranking               : mean confidence, median confidence, "
+        "recognized samples, median minimum margin; then least perturbation"
     )
     print()
     print(f"Top {min(top_n, len(ranked))} internally ranked candidates:")
-    print(" rank   dx1 dy1 dx2 dy2   recognized       p10 margin   median margin")
+    print(
+        " rank   dx1 dy1 dx2 dy2   mean conf   median conf   "
+        "recognized   median margin"
+    )
     for item in ranked[:top_n]:
         candidate = item.candidate
         print(
             f" {item.experimental_rank:4d}  "
             f"{candidate.dx1:+3d} {candidate.dy1:+3d} "
             f"{candidate.dx2:+3d} {candidate.dy2:+3d}   "
-            f"{item.recognized_samples:4d}/{item.total_samples:<4d} "
-            f"{100.0 * item.recognized_fraction:7.2f}%   "
-            f"{item.p10_min_margin:10.4f}   "
+            f"{item.mean_digit_confidence:9.6f}   "
+            f"{item.median_digit_confidence:11.6f}   "
+            f"{item.recognized_samples:4d}/{item.total_samples:<4d}   "
             f"{item.median_min_margin:13.4f}"
         )
 
