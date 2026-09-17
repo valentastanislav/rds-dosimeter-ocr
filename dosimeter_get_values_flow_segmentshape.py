@@ -277,6 +277,12 @@ def main() -> int:
 
     original_transform = tight.transform_polygon
     original_flow_main = tight.diag.flow.main
+    original_make_fixed_profile = (
+        tight.diag.flow.fixed_app.make_fixed_profile
+    )
+    captured_fixed_profile = {
+        "profile": None,
+    }
 
     def transform_polygon_with_shape(
         polygon: np.ndarray,
@@ -321,13 +327,21 @@ def main() -> int:
 
         return np.rint(points).astype(np.int32)
 
+    def make_fixed_profile_with_capture(profile, grid):
+        fixed_profile = original_make_fixed_profile(
+            profile,
+            grid,
+        )
+        captured_fixed_profile["profile"] = fixed_profile
+        return fixed_profile
+
     def flow_main_with_exact_previews(*args, **kwargs):
         if not shape_args.preview_time:
             return original_flow_main(*args, **kwargs)
 
-        profile = kwargs.get("profile_override")
-        if profile is None:
-            profile = tight.core.PROFILES["rds200"]
+        source_profile = kwargs.get("profile_override")
+        if source_profile is None:
+            source_profile = tight.core.PROFILES["rds200"]
 
         previous_observer = kwargs.get(
             "display_cache_observer"
@@ -340,10 +354,16 @@ def main() -> int:
         ):
             del total_frames
 
+            preview_profile = (
+                captured_fixed_profile["profile"]
+                if captured_fixed_profile["profile"] is not None
+                else source_profile
+            )
+
             write_exact_previews(
                 display_cache,
                 sample_fps,
-                profile,
+                preview_profile,
                 shape_args.preview_time,
                 shape_args.preview_dir,
             )
@@ -377,6 +397,9 @@ def main() -> int:
     saved_argv = sys.argv
     tight.transform_polygon = transform_polygon_with_shape
     tight.diag.flow.main = flow_main_with_exact_previews
+    tight.diag.flow.fixed_app.make_fixed_profile = (
+        make_fixed_profile_with_capture
+    )
     sys.argv = [saved_argv[0], *remaining]
 
     try:
@@ -384,6 +407,9 @@ def main() -> int:
     finally:
         tight.transform_polygon = original_transform
         tight.diag.flow.main = original_flow_main
+        tight.diag.flow.fixed_app.make_fixed_profile = (
+            original_make_fixed_profile
+        )
         sys.argv = saved_argv
 
 
