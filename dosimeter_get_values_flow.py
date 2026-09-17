@@ -120,6 +120,10 @@ ReferenceBoxSelector = Callable[
     [np.ndarray],
     ReferenceBox,
 ]
+DisplayCacheObserver = Callable[
+    [dict[int, np.ndarray], int, float],
+    None,
+]
 FLOW_CLI_USAGE = (
     "python3 dosimeter_get_values_flow.py "
     "<video file> <output file> [options]"
@@ -2191,6 +2195,7 @@ def main(
     argv: Sequence[str] | None = None,
     decode_samples: roi_app.DecodeSamples | None = None,
     profile_override: core.Profile | None = None,
+    display_cache_observer: DisplayCacheObserver | None = None,
 ) -> int:
 
     selected_argv = (
@@ -2874,6 +2879,13 @@ def main(
                 ),
             )
         )
+
+        if result == 0 and display_cache_observer is not None:
+            display_cache_observer(
+                dict(display_cache),
+                len(transforms),
+                sample_fps,
+            )
 
         # ------------------------------------------------------
         # Diagnostics
