@@ -6,11 +6,21 @@ optical-flow feature detection to a ring OUTSIDE the manually selected
 reference display box.  The entire interior of the reference box is excluded,
 so changing LCD graphics cannot contribute tracking features.
 
-For selected sampled times it can compare the production cumulative transform
+It also exposes an experimental registration mode:
+
+    --flow-registration cumulative   # current shared flow behaviour
+    --flow-registration direct       # reference -> every sampled frame
+
+The direct mode deliberately reuses the same LK + RANSAC step estimator as the
+normal flow code, but always compares the fixed reference frame directly with
+the target frame instead of composing frame-to-frame transforms.  This keeps
+the experiment focused on accumulation drift rather than changing the motion
+estimator itself.
+
+For selected sampled times it can compare the transform used by the pipeline
 against a fresh DIRECT registration from the reference frame to that target
 frame.  It also writes visual diagnostics showing reference features, tracked
-points, transformed reference-box outlines, and fixed-coordinate crops after
-cumulative versus direct stabilization.
+points, transformed reference-box outlines, and fixed-coordinate crops.
 
 It delegates all other experimental geometry/preview options to
 ``dosimeter_get_values_flow_segmentshape.py``.
@@ -43,14 +53,23 @@ def parse_ring_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
         ),
     )
     parser.add_argument(
+        "--flow-registration",
+        choices=("cumulative", "direct"),
+        default="cumulative",
+        help=(
+            "optical-flow registration strategy: cumulative keeps the current "
+            "frame-to-frame composition; direct estimates reference-to-frame "
+            "motion independently for every sampled frame"
+        ),
+    )
+    parser.add_argument(
         "--motion-diagnostic-time",
         type=float,
         action="append",
         default=None,
         metavar="SECONDS",
         help=(
-            "compare production cumulative flow with direct reference-to-"
-            "target registration at this sampled time; may be repeated"
+            "print flow diagnostics at this sampled time; may be repeated"
         ),
     )
     parser.add_argument(
@@ -58,7 +77,7 @@ def parse_ring_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
         type=Path,
         default=Path("rds200_flow_diagnostics"),
         help=(
-            "directory for direct-vs-cumulative tracking diagnostics "
+            "directory for tracking diagnostics "
             "(default: rds200_flow_diagnostics)"
         ),
     )
@@ -79,17 +98,7 @@ def main() -> int:
     core = flow.core
 
     original_make_feature_mask = flow.make_feature_mask
-    original_estimate_step = flow.estimate_step
     original_precompute_motion = flow.precompute_motion
-
-    diagnostic_context: dict[str, object] = {
-        "active": False,
-        "forward_call": 0,
-        "reference_index": 0,
-        "target_indices": set(),
-        "maximum_target": -1,
-        "steps": {},
-    }
 
     def ring_bounds(frame_shape, box):
         frame_height = frame_shape[0]
@@ -134,8 +143,7 @@ def main() -> int:
             -1,
         )
 
-        # Exclude the ENTIRE selected display box.  Only the outside ring may
-        # supply optical-flow features.
+        # Only the outside ring may supply optical-flow features.
         cv2.rectangle(
             mask,
             (x, y),
@@ -146,104 +154,140 @@ def main() -> int:
 
         return mask
 
-    def estimate_step_with_diagnostics(*args, **kwargs):
-        result = original_estimate_step(*args, **kwargs)
-
-        if not diagnostic_context["active"]:
-            return result
-
-        diagnostic_context["forward_call"] = int(
-            diagnostic_context["forward_call"]
-        ) + 1
-
-        current_index = (
-            int(diagnostic_context["reference_index"])
-            + int(diagnostic_context["forward_call"])
-        )
-
-        if current_index > int(diagnostic_context["maximum_target"]):
-            return result
-
-        target_indices = diagnostic_context["target_indices"]
-        if current_index not in target_indices:
-            return result
-
-        (
-            accepted,
-            delta,
-            _tracked_points,
-            number_tracked,
-            number_inliers,
-        ) = result
-
-        dx, dy, rotation, scale = flow.decompose_similarity(delta)
-        diagnostic_context["steps"][current_index] = {
-            "accepted": bool(accepted),
-            "tracked": int(number_tracked),
-            "inliers": int(number_inliers),
-            "dx": float(dx),
-            "dy": float(dy),
-            "rotation": float(rotation),
-            "scale": float(scale),
-        }
-
-        return result
-
     def direct_registration(
         reference_gray: np.ndarray,
         target_gray: np.ndarray,
         reference_points: np.ndarray,
+        maximum_translation: float,
+        maximum_rotation: float,
+        minimum_scale: float,
+        maximum_scale: float,
+        minimum_inliers: int,
     ):
-        current_points, status, error = cv2.calcOpticalFlowPyrLK(
+        return flow.estimate_step(
             reference_gray,
             target_gray,
             reference_points,
-            None,
-            winSize=(31, 31),
-            maxLevel=3,
-            criteria=(
-                cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
-                40,
-                0.01,
-            ),
+            maximum_translation,
+            maximum_rotation,
+            minimum_scale,
+            maximum_scale,
+            minimum_inliers,
         )
 
-        if current_points is None or status is None:
-            return None
-
-        valid = status.reshape(-1) == 1
-        previous = reference_points.reshape(-1, 2)[valid]
-        current = current_points.reshape(-1, 2)[valid]
-
-        if error is not None:
-            good_error = error.reshape(-1)[valid]
-            keep = good_error < 35.0
-            previous = previous[keep]
-            current = current[keep]
-
-        if len(previous) < 3:
-            return None
-
-        affine, inlier_mask = cv2.estimateAffinePartial2D(
-            previous,
-            current,
-            method=cv2.RANSAC,
-            ransacReprojThreshold=2.5,
-            maxIters=2000,
-            confidence=0.995,
-            refineIters=10,
+    def replace_with_direct_transforms(
+        original_result,
+        video,
+        info,
+        profile,
+        processing_width,
+        sample_fps,
+        reference_time,
+        maximum_translation,
+        maximum_rotation,
+        minimum_scale,
+        maximum_scale,
+        minimum_inliers,
+    ):
+        cumulative_transforms, reference_box, processing_size, _stats = (
+            original_result
         )
 
-        if affine is None or inlier_mask is None:
-            return None
-
-        inliers = inlier_mask.reshape(-1) == 1
-        return (
-            flow.affine_to_homogeneous(affine),
-            previous,
-            current,
-            inliers,
+        frames = list(
+            core.iter_ffmpeg_frames(
+                video,
+                info,
+                sample_fps,
+                processing_width,
+            )
         )
+
+        if not frames:
+            raise RuntimeError("No sampled frames available for direct flow.")
+
+        reference_index = int(round(reference_time * sample_fps))
+        reference_index = max(0, min(reference_index, len(frames) - 1))
+
+        gray_frames = [
+            cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            for frame in frames
+        ]
+        reference_gray = gray_frames[reference_index]
+        reference_mask = make_ring_feature_mask(
+            reference_gray.shape,
+            reference_box,
+            profile,
+        )
+        reference_points = flow.detect_features(
+            reference_gray,
+            reference_mask,
+        )
+
+        if reference_points is None or len(reference_points) < minimum_inliers:
+            raise RuntimeError(
+                "Not enough reference features for direct registration."
+            )
+
+        transforms = [
+            flow.identity_matrix()
+            for _ in gray_frames
+        ]
+
+        stats: dict[str, float | int] = {
+            "accepted": 0,
+            "rejected": 0,
+            "tracked_points_sum": 0,
+            "inliers_sum": 0,
+            "steps": 0,
+            "redetections": 0,
+            "direct_fallbacks": 0,
+        }
+
+        for frame_index, current_gray in enumerate(gray_frames):
+            if frame_index == reference_index:
+                transforms[frame_index] = flow.identity_matrix()
+                continue
+
+            (
+                accepted,
+                matrix,
+                _tracked_points,
+                number_tracked,
+                number_inliers,
+            ) = direct_registration(
+                reference_gray,
+                current_gray,
+                reference_points,
+                maximum_translation,
+                maximum_rotation,
+                minimum_scale,
+                maximum_scale,
+                minimum_inliers,
+            )
+
+            stats["steps"] += 1
+            stats["tracked_points_sum"] += number_tracked
+            stats["inliers_sum"] += number_inliers
+
+            if accepted:
+                transforms[frame_index] = matrix
+                stats["accepted"] += 1
+            else:
+                # Experimental safety fallback: preserve the old cumulative
+                # transform only for targets where the direct fit fails.
+                transforms[frame_index] = cumulative_transforms[frame_index]
+                stats["rejected"] += 1
+                stats["direct_fallbacks"] += 1
+
+        print()
+        print("Direct reference-registration diagnostics:")
+        print(f"  reference frame      : {reference_index}")
+        print(f"  reference features   : {len(reference_points)}")
+        print(f"  accepted direct fits : {stats['accepted']}")
+        print(f"  rejected direct fits : {stats['rejected']}")
+        print(f"  cumulative fallbacks : {stats['direct_fallbacks']}")
+
+        return transforms, reference_box, processing_size, stats
 
     def transform_box(box, matrix):
         x, y, width, height = box
@@ -304,6 +348,11 @@ def main() -> int:
         transforms,
         sample_fps,
         target_indices,
+        maximum_translation,
+        maximum_rotation,
+        minimum_scale,
+        maximum_scale,
+        minimum_inliers,
     ):
         output_dir = ring_args.flow_diagnostic_dir
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -347,8 +396,6 @@ def main() -> int:
             cv2.COLOR_BGR2GRAY,
         )
 
-        direct_results = {}
-
         for frame_index in sorted(target_indices):
             if frame_index < 0 or frame_index >= len(frames):
                 continue
@@ -358,28 +405,29 @@ def main() -> int:
                 target_frame,
                 cv2.COLOR_BGR2GRAY,
             )
-            direct = direct_registration(
+            (
+                accepted,
+                direct_matrix,
+                tracked_points,
+                _number_tracked,
+                _number_inliers,
+            ) = direct_registration(
                 reference_gray,
                 target_gray,
                 reference_points,
+                maximum_translation,
+                maximum_rotation,
+                minimum_scale,
+                maximum_scale,
+                minimum_inliers,
             )
-            if direct is None:
-                direct_results[frame_index] = None
+            if not accepted:
                 continue
 
-            direct_matrix, previous, current, inliers = direct
-            cumulative = transforms[frame_index]
-            residual = np.linalg.inv(direct_matrix) @ cumulative
-            direct_results[frame_index] = {
-                "matrix": direct_matrix,
-                "tracked": len(previous),
-                "inliers": int(np.sum(inliers)),
-                "residual": residual,
-            }
-
+            used_matrix = transforms[frame_index]
             tracks = target_frame.copy()
             direct_polygon = transform_box(reference_box, direct_matrix)
-            cumulative_polygon = transform_box(reference_box, cumulative)
+            used_polygon = transform_box(reference_box, used_matrix)
 
             cv2.polylines(
                 tracks,
@@ -390,26 +438,25 @@ def main() -> int:
             )
             cv2.polylines(
                 tracks,
-                [cumulative_polygon],
+                [used_polygon],
                 True,
                 (0, 0, 220),
                 3,
             )
 
-            for previous_point, current_point, is_inlier in zip(
-                previous,
-                current,
-                inliers,
-            ):
-                p0 = tuple(np.rint(previous_point).astype(int))
-                p1 = tuple(np.rint(current_point).astype(int))
-                color = (0, 200, 0) if is_inlier else (0, 165, 255)
-                cv2.line(tracks, p0, p1, color, 1, cv2.LINE_AA)
-                cv2.circle(tracks, p1, 3, color, -1)
+            if tracked_points is not None:
+                for point in tracked_points.reshape(-1, 2):
+                    cv2.circle(
+                        tracks,
+                        tuple(np.rint(point).astype(int)),
+                        3,
+                        (0, 220, 0),
+                        -1,
+                    )
 
             cv2.putText(
                 tracks,
-                "GREEN=direct box  RED=cumulative box",
+                "GREEN=direct  RED=pipeline-used transform",
                 (8, 22),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.55,
@@ -419,7 +466,7 @@ def main() -> int:
             )
             cv2.putText(
                 tracks,
-                "GREEN=direct box  RED=cumulative box",
+                "GREEN=direct  RED=pipeline-used transform",
                 (8, 22),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.55,
@@ -429,16 +476,13 @@ def main() -> int:
             )
 
             cv2.imwrite(
-                str(
-                    output_dir
-                    / f"frame_{frame_index:04d}_tracks.jpg"
-                ),
+                str(output_dir / f"frame_{frame_index:04d}_tracks.jpg"),
                 tracks,
             )
 
             raw_crop = crop_box(target_frame, reference_box)
-            cumulative_crop = crop_box(
-                stabilized_frame(target_frame, cumulative),
+            used_crop = crop_box(
+                stabilized_frame(target_frame, used_matrix),
                 reference_box,
             )
             direct_crop = crop_box(
@@ -449,24 +493,19 @@ def main() -> int:
             comparison = np.hstack(
                 (
                     labeled(raw_crop, "raw fixed crop"),
-                    labeled(cumulative_crop, "cumulative stabilization"),
+                    labeled(
+                        used_crop,
+                        f"pipeline: {ring_args.flow_registration}",
+                    ),
                     labeled(direct_crop, "direct reference stabilization"),
                 )
             )
             cv2.imwrite(
-                str(
-                    output_dir
-                    / f"frame_{frame_index:04d}_crops.jpg"
-                ),
+                str(output_dir / f"frame_{frame_index:04d}_crops.jpg"),
                 comparison,
             )
 
-        return direct_results
-
-    def precompute_motion_with_diagnostics(*args, **kwargs):
-        if not ring_args.motion_diagnostic_time:
-            return original_precompute_motion(*args, **kwargs)
-
+    def precompute_motion_with_registration(*args, **kwargs):
         def argument(name, position):
             return kwargs[name] if name in kwargs else args[position]
 
@@ -476,35 +515,36 @@ def main() -> int:
         processing_width = int(argument("processing_width", 4))
         sample_fps = float(argument("sample_fps", 5))
         reference_time = float(argument("reference_time", 6))
+        maximum_translation = float(argument("maximum_translation", 7))
+        maximum_rotation = float(argument("maximum_rotation", 8))
+        minimum_scale = float(argument("minimum_scale", 9))
+        maximum_scale = float(argument("maximum_scale", 10))
+        minimum_inliers = int(argument("minimum_inliers", 11))
 
-        reference_index = int(round(reference_time * sample_fps))
-        target_indices = {
-            int(round(float(value) * sample_fps))
-            for value in ring_args.motion_diagnostic_time
-            if float(value) >= reference_time
-        }
+        original_result = original_precompute_motion(*args, **kwargs)
 
-        diagnostic_context["active"] = True
-        diagnostic_context["forward_call"] = 0
-        diagnostic_context["reference_index"] = reference_index
-        diagnostic_context["target_indices"] = target_indices
-        diagnostic_context["maximum_target"] = max(
-            target_indices,
-            default=-1,
-        )
-        diagnostic_context["steps"] = {}
+        if ring_args.flow_registration == "direct":
+            result = replace_with_direct_transforms(
+                original_result,
+                video,
+                info,
+                profile,
+                processing_width,
+                sample_fps,
+                reference_time,
+                maximum_translation,
+                maximum_rotation,
+                minimum_scale,
+                maximum_scale,
+                minimum_inliers,
+            )
+        else:
+            result = original_result
 
-        try:
-            result = original_precompute_motion(*args, **kwargs)
-        finally:
-            diagnostic_context["active"] = False
+        if not ring_args.motion_diagnostic_time:
+            return result
 
-        transforms = result[0]
-        reference_box = result[1]
-        steps = diagnostic_context["steps"]
-
-        # Re-read the same sampled BGR frames only for diagnostics.  This does
-        # not alter the production transforms or OCR path.
+        transforms, reference_box, _processing_size, _stats = result
         frames = list(
             core.iter_ffmpeg_frames(
                 video,
@@ -513,14 +553,8 @@ def main() -> int:
                 processing_width,
             )
         )
-
-        if reference_index >= len(frames):
-            print(
-                "Direct flow diagnostics skipped: reference frame missing.",
-                file=sys.stderr,
-            )
-            return result
-
+        reference_index = int(round(reference_time * sample_fps))
+        reference_index = max(0, min(reference_index, len(frames) - 1))
         reference_gray = cv2.cvtColor(
             frames[reference_index],
             cv2.COLOR_BGR2GRAY,
@@ -535,9 +569,13 @@ def main() -> int:
             reference_mask,
         )
 
-        direct_results = {}
+        target_indices = {
+            int(round(float(value) * sample_fps))
+            for value in ring_args.motion_diagnostic_time
+        }
+
         if reference_points is not None:
-            direct_results = write_visual_diagnostics(
+            write_visual_diagnostics(
                 frames,
                 reference_index,
                 reference_box,
@@ -545,81 +583,87 @@ def main() -> int:
                 transforms,
                 sample_fps,
                 target_indices,
+                maximum_translation,
+                maximum_rotation,
+                minimum_scale,
+                maximum_scale,
+                minimum_inliers,
             )
 
         print()
         print("Target-time optical-flow diagnostics:")
+        print(f"  registration mode    : {ring_args.flow_registration}")
         print(
             f"  reference index/time : {reference_index} / "
             f"{reference_index / sample_fps:.3f} s"
         )
-        print(
-            f"  diagnostic images    : {ring_args.flow_diagnostic_dir}"
-        )
+        print(f"  diagnostic images    : {ring_args.flow_diagnostic_dir}")
 
         for requested_time in ring_args.motion_diagnostic_time:
             frame_index = int(round(float(requested_time) * sample_fps))
             if frame_index < 0 or frame_index >= len(transforms):
-                print(
-                    f"  requested {requested_time:.3f}s -> frame "
-                    f"{frame_index}: outside sampled video"
-                )
                 continue
 
-            cumulative = transforms[frame_index]
-            cdx, cdy, crot, cscale = flow.decompose_similarity(cumulative)
-            step = steps.get(frame_index)
-            direct = direct_results.get(frame_index)
+            used_matrix = transforms[frame_index]
+            udx, udy, urot, uscale = flow.decompose_similarity(used_matrix)
+            (
+                accepted,
+                direct_matrix,
+                _tracked_points,
+                number_tracked,
+                number_inliers,
+            ) = direct_registration(
+                reference_gray,
+                cv2.cvtColor(frames[frame_index], cv2.COLOR_BGR2GRAY),
+                reference_points,
+                maximum_translation,
+                maximum_rotation,
+                minimum_scale,
+                maximum_scale,
+                minimum_inliers,
+            ) if reference_points is not None else (
+                False,
+                flow.identity_matrix(),
+                None,
+                0,
+                0,
+            )
 
             print(
                 f"  frame {frame_index:4d} "
                 f"t={frame_index / sample_fps:7.3f}s"
             )
-            if step is None:
-                print("    step       : not captured")
-            else:
-                print(
-                    "    step       : "
-                    f"accepted={int(step['accepted'])} "
-                    f"tracked={step['tracked']} inliers={step['inliers']} "
-                    f"dx={step['dx']:+.3f}px dy={step['dy']:+.3f}px "
-                    f"rot={step['rotation']:+.4f}deg "
-                    f"scale={step['scale']:.6f}"
-                )
             print(
-                "    cumulative : "
-                f"dx={cdx:+.3f}px dy={cdy:+.3f}px "
-                f"rot={crot:+.4f}deg scale={cscale:.6f}"
+                "    pipeline   : "
+                f"dx={udx:+.3f}px dy={udy:+.3f}px "
+                f"rot={urot:+.4f}deg scale={uscale:.6f}"
             )
-
-            if direct is None:
-                print("    direct     : unavailable")
-            else:
-                direct_matrix = direct["matrix"]
+            if accepted:
                 ddx, ddy, drot, dscale = flow.decompose_similarity(
                     direct_matrix
                 )
-                rdx, rdy, rrot, rscale = flow.decompose_similarity(
-                    direct["residual"]
-                )
                 print(
                     "    direct     : "
-                    f"tracked={direct['tracked']} "
-                    f"inliers={direct['inliers']} "
+                    f"tracked={number_tracked} inliers={number_inliers} "
                     f"dx={ddx:+.3f}px dy={ddy:+.3f}px "
                     f"rot={drot:+.4f}deg scale={dscale:.6f}"
                 )
+                residual = np.linalg.inv(direct_matrix) @ used_matrix
+                rdx, rdy, rrot, rscale = flow.decompose_similarity(residual)
                 print(
-                    "    cum/direct : "
+                    "    used/direct: "
                     f"dx={rdx:+.3f}px dy={rdy:+.3f}px "
                     f"rot={rrot:+.4f}deg scale={rscale:.6f}"
                 )
+            else:
+                print("    direct     : unavailable")
 
         return result
 
     print("Experimental ring-only optical-flow tracking:")
-    print(f"  ring padding : {ring_args.flow_ring_padding:.3f}")
-    print("  box interior : fully excluded")
+    print(f"  ring padding     : {ring_args.flow_ring_padding:.3f}")
+    print("  box interior     : fully excluded")
+    print(f"  registration mode: {ring_args.flow_registration}")
     if ring_args.motion_diagnostic_time:
         print(
             "  motion diagnostics: "
@@ -628,20 +672,18 @@ def main() -> int:
                 for value in ring_args.motion_diagnostic_time
             )
         )
-        print(f"  diagnostic dir: {ring_args.flow_diagnostic_dir}")
+        print(f"  diagnostic dir   : {ring_args.flow_diagnostic_dir}")
     print()
 
     saved_argv = sys.argv
     flow.make_feature_mask = make_ring_feature_mask
-    flow.estimate_step = estimate_step_with_diagnostics
-    flow.precompute_motion = precompute_motion_with_diagnostics
+    flow.precompute_motion = precompute_motion_with_registration
     sys.argv = [saved_argv[0], *remaining]
 
     try:
         return segmentshape.main()
     finally:
         flow.make_feature_mask = original_make_feature_mask
-        flow.estimate_step = original_estimate_step
         flow.precompute_motion = original_precompute_motion
         sys.argv = saved_argv
 
