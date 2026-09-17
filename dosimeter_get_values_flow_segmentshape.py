@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
+import cv2
 import numpy as np
 
 import dosimeter_get_values_flow_tightsegments as tight
@@ -66,7 +68,194 @@ def parse_shape_args(
         ),
     )
 
+    parser.add_argument(
+        "--preview-time",
+        type=float,
+        action="append",
+        default=None,
+        metavar="SECONDS",
+        help=(
+            "write an exact cached-main-pass geometry preview at this time; "
+            "may be repeated"
+        ),
+    )
+
+    parser.add_argument(
+        "--preview-dir",
+        type=Path,
+        default=Path("rds200_segmentshape_previews"),
+        help=(
+            "directory for --preview-time images "
+            "(default: rds200_segmentshape_previews)"
+        ),
+    )
+
     return parser.parse_known_args(argv)
+
+
+def draw_preview_geometry(
+    display: np.ndarray,
+    profile,
+) -> np.ndarray:
+    """Draw the exact digit boxes and per-digit segment polygons."""
+
+    overlay = cv2.cvtColor(
+        display,
+        cv2.COLOR_GRAY2BGR,
+    )
+
+    per_digit = getattr(
+        profile,
+        "digit_segment_polygons",
+        None,
+    )
+
+    for digit_index, (x1, y1, x2, y2) in enumerate(
+        profile.digit_boxes
+    ):
+        cv2.rectangle(
+            overlay,
+            (x1, y1),
+            (x2, y2),
+            (0, 180, 0),
+            1,
+        )
+
+        box_width = max(1, x2 - x1)
+        box_height = max(1, y2 - y1)
+        scale_x = box_width / 65.0
+        scale_y = box_height / 130.0
+
+        polygons = (
+            per_digit[digit_index]
+            if per_digit is not None
+            else profile.segment_polygons
+        )
+
+        for name in tight.core.SEGMENT_ORDER:
+            local = np.asarray(
+                polygons[name],
+                dtype=float,
+            )
+            points = np.empty_like(
+                local,
+                dtype=np.int32,
+            )
+            points[:, 0] = np.rint(
+                x1 + local[:, 0] * scale_x
+            ).astype(np.int32)
+            points[:, 1] = np.rint(
+                y1 + local[:, 1] * scale_y
+            ).astype(np.int32)
+
+            cv2.polylines(
+                overlay,
+                [points],
+                True,
+                (0, 180, 0),
+                1,
+            )
+
+    return overlay
+
+
+def write_exact_previews(
+    display_cache: dict[int, np.ndarray],
+    sample_fps: float,
+    profile,
+    times: list[float],
+    output_dir: Path,
+) -> None:
+    output_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    if not display_cache:
+        print("Exact preview: display cache is empty.")
+        return
+
+    maximum_index = max(display_cache)
+
+    print()
+    print("Exact cached-main-pass previews:")
+
+    for requested_time in times:
+        frame_index = int(
+            round(requested_time * sample_fps)
+        )
+        frame_index = max(
+            0,
+            min(frame_index, maximum_index),
+        )
+        actual_time = frame_index / sample_fps
+
+        display = display_cache.get(frame_index)
+        if display is None:
+            print(
+                f"  t={requested_time:.3f}s -> frame {frame_index}: missing"
+            )
+            continue
+
+        overlay = draw_preview_geometry(
+            display,
+            profile,
+        )
+
+        header_height = 54
+        canvas = np.full(
+            (
+                overlay.shape[0] + header_height,
+                overlay.shape[1],
+                3,
+            ),
+            255,
+            dtype=np.uint8,
+        )
+        canvas[header_height:] = overlay
+
+        cv2.putText(
+            canvas,
+            (
+                f"EXACT CACHED MAIN PASS frame={frame_index} "
+                f"t={actual_time:.3f}s"
+            ),
+            (8, 23),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.48,
+            (0, 80, 0),
+            1,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            canvas,
+            f"requested t={requested_time:.3f}s",
+            (8, 44),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.42,
+            (0, 0, 0),
+            1,
+            cv2.LINE_AA,
+        )
+
+        filename = (
+            f"frame_{frame_index:04d}_"
+            f"t{actual_time:08.3f}.jpg"
+        )
+        path = output_dir / filename
+
+        if not cv2.imwrite(
+            str(path),
+            canvas,
+        ):
+            raise RuntimeError(
+                f"Could not write exact preview: {path}"
+            )
+
+        print(
+            f"  requested {requested_time:.3f}s -> "
+            f"{actual_time:.3f}s: {path}"
+        )
 
 
 def main() -> int:
@@ -87,6 +276,7 @@ def main() -> int:
         return 1
 
     original_transform = tight.transform_polygon
+    original_flow_main = tight.diag.flow.main
 
     def transform_polygon_with_shape(
         polygon: np.ndarray,
@@ -131,21 +321,69 @@ def main() -> int:
 
         return np.rint(points).astype(np.int32)
 
+    def flow_main_with_exact_previews(*args, **kwargs):
+        if not shape_args.preview_time:
+            return original_flow_main(*args, **kwargs)
+
+        profile = kwargs.get("profile_override")
+        if profile is None:
+            profile = tight.core.PROFILES["rds200"]
+
+        previous_observer = kwargs.get(
+            "display_cache_observer"
+        )
+
+        def observer(
+            display_cache,
+            total_frames,
+            sample_fps,
+        ):
+            del total_frames
+
+            write_exact_previews(
+                display_cache,
+                sample_fps,
+                profile,
+                shape_args.preview_time,
+                shape_args.preview_dir,
+            )
+
+            if previous_observer is not None:
+                previous_observer(
+                    display_cache,
+                    len(display_cache),
+                    sample_fps,
+                )
+
+        kwargs["display_cache_observer"] = observer
+        return original_flow_main(*args, **kwargs)
+
     print("Experimental RDS-200 segment shape refinement:")
     print(f"  x thickness : {shape_args.segment_x_thickness:.3f}")
     print(f"  y thickness : {shape_args.segment_y_thickness:.3f}")
     print(f"  x shear     : {shape_args.segment_x_shear:+.3f}")
     print(f"  shear center: {shape_args.segment_shear_center:.2f}")
+    if shape_args.preview_time:
+        print(
+            "  preview times: "
+            + ", ".join(
+                f"{value:.3f}s"
+                for value in shape_args.preview_time
+            )
+        )
+        print(f"  preview dir  : {shape_args.preview_dir}")
     print()
 
     saved_argv = sys.argv
     tight.transform_polygon = transform_polygon_with_shape
+    tight.diag.flow.main = flow_main_with_exact_previews
     sys.argv = [saved_argv[0], *remaining]
 
     try:
         return tight.main()
     finally:
         tight.transform_polygon = original_transform
+        tight.diag.flow.main = original_flow_main
         sys.argv = saved_argv
 
 
