@@ -100,13 +100,13 @@ python3 dosimeter_get_values_flow.py my_video.MOV rds30_intervals.csv \
   --track-time 20.0 \
   --select-reference-box \
   --select-quad \
-  --decoder-strategy rds30-joint-spatial \
-  --joint-spatial-geometry-emission glyph-independent \
-  --joint-spatial-confidence 0.358 \
-  --joint-spatial-min-nine-margin 0.400 \
   --raw-output rds30_raw.csv \
   --joint-spatial-diagnostics-dir rds30_diagnostics
 ```
+
+For `--profile rds30`, the validated beta decoder configuration is now selected automatically: joint-spatial decoding, glyph-independent geometry emission, confidence threshold `0.358`, and weak-9 margin threshold `0.400`.
+
+These values can still be overridden explicitly from the command line; `--decoder-strategy default` selects the historical decoder.
 
 For a beta test, **do not tune `0.358` or `0.400` after looking at the result**. The point is to test the frozen configuration on genuinely new data.
 

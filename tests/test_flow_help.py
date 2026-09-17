@@ -19,7 +19,19 @@ class FlowHelpTests(unittest.TestCase):
         self.assertIn("--select-reference-box", text)
         self.assertIn("--select-quad", text)
         self.assertIn("--select-grid", text)
-        self.assertIn("--decoder-strategy rds30-joint-spatial", text)
+        self.assertIn("validated beta configuration is automatic", text)
+        self.assertIn(
+            "decoder strategy:        rds30-joint-spatial",
+            text,
+        )
+        self.assertIn(
+            "--decoder-strategy {default,rds30-joint-spatial}",
+            text,
+        )
+        self.assertIn(
+            "Use --decoder-strategy default",
+            text,
+        )
         self.assertIn("--rds200-pattern-refinement", text)
         self.assertIn("Geometry is video-specific", text)
 
