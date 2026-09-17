@@ -69,6 +69,17 @@ def parse_shape_args(
     )
 
     parser.add_argument(
+        "--flow-feature-padding",
+        type=float,
+        default=None,
+        help=(
+            "override the optical-flow feature-mask padding around the "
+            "reference display box as a fraction of box size; the normal "
+            "flow code uses 0.08"
+        ),
+    )
+
+    parser.add_argument(
         "--preview-time",
         type=float,
         action="append",
@@ -275,10 +286,23 @@ def main() -> int:
         )
         return 1
 
+    if (
+        shape_args.flow_feature_padding is not None
+        and shape_args.flow_feature_padding < 0.0
+    ):
+        print(
+            "Error: --flow-feature-padding must be non-negative.",
+            file=sys.stderr,
+        )
+        return 1
+
     original_transform = tight.transform_polygon
     original_flow_main = tight.diag.flow.main
     original_make_fixed_profile = (
         tight.diag.flow.fixed_app.make_fixed_profile
+    )
+    original_make_feature_mask = (
+        tight.diag.flow.make_feature_mask
     )
     captured_fixed_profile = {
         "profile": None,
@@ -335,6 +359,65 @@ def main() -> int:
         captured_fixed_profile["profile"] = fixed_profile
         return fixed_profile
 
+    def make_feature_mask_with_padding(
+        frame_shape,
+        box,
+        profile,
+    ):
+        if shape_args.flow_feature_padding is None:
+            return original_make_feature_mask(
+                frame_shape,
+                box,
+                profile,
+            )
+
+        frame_height = frame_shape[0]
+        frame_width = frame_shape[1]
+        x, y, width, height = box
+        fraction = shape_args.flow_feature_padding
+
+        pad_x = int(round(fraction * width))
+        pad_y = int(round(fraction * height))
+
+        outer_x1 = max(0, x - pad_x)
+        outer_y1 = max(0, y - pad_y)
+        outer_x2 = min(frame_width, x + width + pad_x)
+        outer_y2 = min(frame_height, y + height + pad_y)
+
+        mask = np.zeros(
+            (frame_height, frame_width),
+            dtype=np.uint8,
+        )
+        cv2.rectangle(
+            mask,
+            (outer_x1, outer_y1),
+            (outer_x2 - 1, outer_y2 - 1),
+            255,
+            -1,
+        )
+
+        (
+            exclusion_x1,
+            exclusion_y1,
+            exclusion_x2,
+            exclusion_y2,
+        ) = profile.flow_feature_exclusion_box
+
+        inner_x1 = int(round(x + exclusion_x1 * width))
+        inner_x2 = int(round(x + exclusion_x2 * width))
+        inner_y1 = int(round(y + exclusion_y1 * height))
+        inner_y2 = int(round(y + exclusion_y2 * height))
+
+        cv2.rectangle(
+            mask,
+            (inner_x1, inner_y1),
+            (inner_x2, inner_y2),
+            0,
+            -1,
+        )
+
+        return mask
+
     def flow_main_with_exact_previews(*args, **kwargs):
         if not shape_args.preview_time:
             return original_flow_main(*args, **kwargs)
@@ -383,6 +466,11 @@ def main() -> int:
     print(f"  y thickness : {shape_args.segment_y_thickness:.3f}")
     print(f"  x shear     : {shape_args.segment_x_shear:+.3f}")
     print(f"  shear center: {shape_args.segment_shear_center:.2f}")
+    if shape_args.flow_feature_padding is not None:
+        print(
+            "  flow padding : "
+            f"{shape_args.flow_feature_padding:.3f}"
+        )
     if shape_args.preview_time:
         print(
             "  preview times: "
@@ -400,6 +488,9 @@ def main() -> int:
     tight.diag.flow.fixed_app.make_fixed_profile = (
         make_fixed_profile_with_capture
     )
+    tight.diag.flow.make_feature_mask = (
+        make_feature_mask_with_padding
+    )
     sys.argv = [saved_argv[0], *remaining]
 
     try:
@@ -409,6 +500,9 @@ def main() -> int:
         tight.diag.flow.main = original_flow_main
         tight.diag.flow.fixed_app.make_fixed_profile = (
             original_make_fixed_profile
+        )
+        tight.diag.flow.make_feature_mask = (
+            original_make_feature_mask
         )
         sys.argv = saved_argv
 
