@@ -191,7 +191,7 @@ RDS-30 beta decoder
 
 RDS-200 decoder
   --decoder-strategy default
-      Historical RDS-200 decoder.
+      Production RDS-200 beta decoder.
 
   --rds200-pattern-refinement
       Enable the RDS-200 binary-pattern refinement explicitly.
