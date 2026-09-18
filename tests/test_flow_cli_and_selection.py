@@ -24,6 +24,44 @@ class FlowCliAndSelectionTest(unittest.TestCase):
             "<video file> <output file> [options]",
         )
 
+
+    def test_debug_geometry_uses_per_digit_segment_polygons(self) -> None:
+        display = np.zeros((130, 65), dtype=np.uint8)
+        shared = {
+            name: np.asarray(
+                ((1, 1), (2, 1), (2, 2), (1, 2)),
+                dtype=np.int32,
+            )
+            for name in flow.core.SEGMENT_ORDER
+        }
+        specific = {
+            name: np.asarray(
+                ((10, 20), (12, 20), (12, 22), (10, 22)),
+                dtype=np.int32,
+            )
+            for name in flow.core.SEGMENT_ORDER
+        }
+        profile = SimpleNamespace(
+            digit_boxes=((0, 0, 65, 130),),
+            segment_polygons=shared,
+            digit_segment_polygons=(specific,),
+            decimal_candidates=(),
+        )
+
+        with mock.patch.object(flow.cv2, "polylines") as polylines:
+            flow.draw_decoder_geometry(
+                display,
+                profile,
+                chosen_decimal_places=None,
+                decimal_mode="auto",
+            )
+
+        first_points = polylines.call_args_list[0].args[1][0]
+        np.testing.assert_array_equal(
+            first_points,
+            specific[flow.core.SEGMENT_ORDER[0]],
+        )
+
     def test_reference_box_cancel_closes_window(self) -> None:
         frame = np.zeros((20, 30, 3), dtype=np.uint8)
         with (
