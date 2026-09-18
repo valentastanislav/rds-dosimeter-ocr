@@ -233,20 +233,20 @@ Full unit test:
 PYTHONPATH=. python3 -m unittest discover -s tests
 ```
 
-At the current pre-merge beta checkpoint:
+The RDS-200 beta branch has been merged into `main`. The final pre-merge suite completed successfully:
 
 ```text
-Ran 43 tests
+Ran 47 tests
 OK
 ```
 
-Before merging the RDS-200 beta branch:
+The beta release checkpoint is tagged:
 
-1. rerun the full unit-test suite;
-2. inspect `python3 dosimeter_get_values_flow.py --help`;
-3. inspect the branch diff for accidental experimental artifacts;
-4. merge only after those checks remain clean;
-5. create an RDS-200 beta tag only after the merged commit is known.
+```text
+rds200-beta-2026-09-18
+```
+
+The tag points to commit `a90248c`, including the committed RDS-200 validation ground-truth files.
 
 For future validation, prepare ground truth independently before inspecting OCR output whenever possible.
 
