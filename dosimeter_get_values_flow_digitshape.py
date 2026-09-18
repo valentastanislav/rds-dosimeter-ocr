@@ -83,13 +83,13 @@ def parse_args(argv: list[str]):
 
 
 def align_decimal_candidates_to_bottom_segments(profile):
-    """Align RDS-200 decimal sampling boxes with the final bottom segment.
+    """Align RDS-200 decimal sampling boxes with the final digit geometry.
 
-    The decimal point is part of the same physical LCD glyph geometry as the
-    digits. After the anchored per-digit mask transform, keep each decimal
-    candidate's horizontal position and height, but move it vertically so its
-    lower edge coincides with the lower edge of transformed segment d. The
-    same adjusted boxes are then used by both OCR sampling and debug overlay.
+    Vertically, the lower edge follows the transformed bottom segment d.
+    Horizontally, each decimal box is centred on the boundary between the two
+    neighbouring digit boxes. The box is allowed to straddle that boundary;
+    it is not clipped to either digit. The same adjusted boxes are used by
+    both OCR sampling and the debug overlay.
     """
 
     per_digit = getattr(profile, "digit_segment_polygons", None)
@@ -118,12 +118,37 @@ def align_decimal_candidates_to_bottom_segments(profile):
     target_y2 = max(1, min(int(profile.canonical_height), target_y2))
 
     aligned = []
+    digit_boxes = profile.digit_boxes
+    n_digits = len(digit_boxes)
+
     for x1, old_y1, x2, old_y2, decimal_places in candidates:
+        width = max(1, x2 - x1)
         height = max(1, old_y2 - old_y1)
+
+        # decimal_places is also the number of displayed digits to the right
+        # of the decimal point for the three-digit RDS-200 display.
+        left_index = n_digits - int(decimal_places) - 1
+        right_index = left_index + 1
+
+        if 0 <= left_index < n_digits and 0 <= right_index < n_digits:
+            boundary_x = 0.5 * (
+                digit_boxes[left_index][2]
+                + digit_boxes[right_index][0]
+            )
+            new_x1 = int(round(boundary_x - 0.5 * width))
+            new_x2 = new_x1 + width
+        else:
+            new_x1 = x1
+            new_x2 = x2
+
+        new_x1 = max(0, new_x1)
+        new_x2 = min(int(profile.canonical_width), new_x2)
+
         new_y2 = target_y2
         new_y1 = max(0, new_y2 - height)
+
         aligned.append(
-            (x1, new_y1, x2, new_y2, decimal_places)
+            (new_x1, new_y1, new_x2, new_y2, decimal_places)
         )
 
     return replace(
@@ -199,7 +224,7 @@ def main() -> int:
         )
 
         if aligned_profile.decimal_candidates != fixed_profile.decimal_candidates:
-            print("RDS-200 decimal geometry aligned to bottom segment:")
+            print("RDS-200 decimal geometry aligned to digit boundaries/bottom segment:")
             for old, new in zip(
                 fixed_profile.decimal_candidates,
                 aligned_profile.decimal_candidates,
