@@ -133,6 +133,44 @@ RDS200_SEGMENTS = {
     "g": np.array([[20, 63], [43, 62], [40, 71], [18, 72]], np.int32),
 }
 
+# Validated RDS-200 per-digit sampling geometry for a tight manual grid.
+#
+# These polygons are the frozen result of the geometry-refinement branch:
+# the legacy masks are first adapted to the tight grid and then coherently
+# expanded around per-digit anchors (left: bottom-right, middle: bottom-centre,
+# right: bottom-left).  Keeping the final polygons here makes the production
+# geometry explicit and removes the experimental wrapper stack.
+RDS200_DIGIT_SEGMENTS = (
+    {
+        "a": np.array([[21, 0], [49, 0], [46, 11], [19, 11]], np.int32),
+        "b": np.array([[47, 7], [56, 10], [52, 50], [43, 48]], np.int32),
+        "c": np.array([[41, 71], [50, 67], [47, 114], [38, 120]], np.int32),
+        "d": np.array([[10, 111], [41, 111], [38, 125], [8, 125]], np.int32),
+        "e": np.array([[7, 71], [16, 65], [12, 111], [3, 118]], np.int32),
+        "f": np.array([[10, 7], [19, 4], [16, 48], [7, 54]], np.int32),
+        "g": np.array([[18, 54], [44, 53], [41, 67], [16, 68]], np.int32),
+    },
+    {
+        "a": np.array([[26, 0], [54, 0], [50, 11], [24, 11]], np.int32),
+        "b": np.array([[52, 7], [61, 10], [57, 50], [48, 48]], np.int32),
+        "c": np.array([[46, 71], [55, 67], [52, 114], [42, 120]], np.int32),
+        "d": np.array([[15, 111], [46, 111], [42, 125], [12, 125]], np.int32),
+        "e": np.array([[11, 71], [20, 65], [17, 111], [8, 118]], np.int32),
+        "f": np.array([[15, 7], [24, 4], [20, 48], [11, 54]], np.int32),
+        "g": np.array([[23, 54], [49, 53], [46, 67], [20, 68]], np.int32),
+    },
+    {
+        "a": np.array([[32, 0], [60, 0], [56, 11], [30, 11]], np.int32),
+        "b": np.array([[57, 7], [64, 10], [63, 50], [54, 48]], np.int32),
+        "c": np.array([[52, 71], [61, 67], [57, 114], [48, 120]], np.int32),
+        "d": np.array([[21, 111], [52, 111], [48, 125], [18, 125]], np.int32),
+        "e": np.array([[17, 71], [26, 65], [23, 111], [14, 118]], np.int32),
+        "f": np.array([[21, 7], [30, 4], [26, 48], [17, 54]], np.int32),
+        "g": np.array([[29, 54], [55, 53], [52, 67], [26, 68]], np.int32),
+    },
+)
+
+
 RDS200 = Profile(
     name="rds200",
     canonical_width=493,
@@ -160,14 +198,15 @@ RDS200 = Profile(
         (255, 241, 264, 256, 1),  # decimal point after the second digit
     ),
     default_sample_fps=5.0,
-    default_filter_window=5,
+    default_filter_window=1,
     temporal_filter="median",
     digit_patterns=STANDARD_DIGIT_PATTERNS,
     decoder="pattern",
-    adaptive_y_shift=True,
-    y_shift_min=-22,
-    y_shift_max=10,
+    adaptive_y_shift=False,
+    y_shift_min=0,
+    y_shift_max=0,
     default_min_confidence=0.20,
+    digit_segment_polygons=RDS200_DIGIT_SEGMENTS,
 )
 
 # RDS-30: the digit geometry is wider and slightly more trapezoidal.
