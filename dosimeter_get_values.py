@@ -2255,13 +2255,61 @@ def calculate_summary(
     duration: float,
     display_found_fraction: float,
     recognized_fraction: float,
+    summary_min_confidence: float = 0.20,
 ) -> dict[str, object]:
-    values = np.asarray([run.value for _, _, run in intervals], dtype=float)
-    weights = np.asarray([end - start for start, end, _ in intervals], dtype=float)
-    total_weight = float(np.sum(weights))
+    selected_intervals = [
+        (start, end, run)
+        for start, end, run in intervals
+        if run.confidence >= summary_min_confidence
+    ]
 
-    mean = float(np.sum(values * weights) / total_weight)
-    variance = float(np.sum(weights * (values - mean) ** 2) / total_weight)
+    included_duration = float(
+        sum(
+            end - start
+            for start, end, _run in selected_intervals
+        )
+    )
+    excluded_duration = max(
+        0.0,
+        float(duration) - included_duration,
+    )
+
+    if included_duration > 0.0:
+        values = np.asarray(
+            [
+                run.value
+                for _, _, run in selected_intervals
+            ],
+            dtype=float,
+        )
+        weights = np.asarray(
+            [
+                end - start
+                for start, end, _ in selected_intervals
+            ],
+            dtype=float,
+        )
+
+        mean = float(
+            np.sum(values * weights)
+            / included_duration
+        )
+        variance = float(
+            np.sum(
+                weights
+                * (values - mean) ** 2
+            )
+            / included_duration
+        )
+        std_dev: float | None = math.sqrt(variance)
+        minimum: float | None = float(np.min(values))
+        maximum: float | None = float(np.max(values))
+    else:
+        mean = None
+        variance = None
+        std_dev = None
+        minimum = None
+        maximum = None
 
     return {
         "input_video": str(video),
@@ -2270,11 +2318,25 @@ def calculate_summary(
         "display_found_fraction": display_found_fraction,
         "recognized_fraction": recognized_fraction,
         "interval_count": len(intervals),
+        "summary_min_confidence": summary_min_confidence,
+        "summary_interval_count": len(selected_intervals),
+        "summary_included_duration_s": included_duration,
+        "summary_excluded_duration_s": excluded_duration,
+        "summary_included_fraction": (
+            included_duration / duration
+            if duration > 0.0
+            else 0.0
+        ),
+        "summary_excluded_fraction": (
+            excluded_duration / duration
+            if duration > 0.0
+            else 0.0
+        ),
         "time_weighted_mean": mean,
         "time_weighted_variance": variance,
-        "time_weighted_std_dev": math.sqrt(variance),
-        "minimum": float(np.min(values)),
-        "maximum": float(np.max(values)),
+        "time_weighted_std_dev": std_dev,
+        "minimum": minimum,
+        "maximum": maximum,
     }
 
 
@@ -2283,12 +2345,39 @@ def print_summary(summary: dict[str, object]) -> None:
     print(f"Display found:           {100 * float(summary['display_found_fraction']):10.2f} %")
     print(f"Recognized samples:      {100 * float(summary['recognized_fraction']):10.2f} %")
     print(f"Number of intervals:     {int(summary['interval_count']):10d}")
+    print(
+        "Summary confidence cut: "
+        f"{float(summary['summary_min_confidence']):10.3f}"
+    )
+    print(
+        "Summary intervals used: "
+        f"{int(summary['summary_interval_count']):10d}"
+    )
+    print(
+        "Summary duration used:  "
+        f"{float(summary['summary_included_duration_s']):10.3f} s "
+        f"({100 * float(summary['summary_included_fraction']):.2f} %)"
+    )
+    print(
+        "Summary duration excl.: "
+        f"{float(summary['summary_excluded_duration_s']):10.3f} s "
+        f"({100 * float(summary['summary_excluded_fraction']):.2f} %)"
+    )
     print()
-    print(f"Time-weighted mean:      {float(summary['time_weighted_mean']):10.5g}")
-    print(f"Time-weighted variance:  {float(summary['time_weighted_variance']):10.5g}")
-    print(f"Time-weighted std. dev.: {float(summary['time_weighted_std_dev']):10.5g}")
-    print(f"Minimum:                 {float(summary['minimum']):10.5g}")
-    print(f"Maximum:                 {float(summary['maximum']):10.5g}")
+
+    def format_metric(name: str) -> str:
+        value = summary[name]
+        return (
+            "       n/a"
+            if value is None
+            else f"{float(value):10.5g}"
+        )
+
+    print(f"Time-weighted mean:      {format_metric('time_weighted_mean')}")
+    print(f"Time-weighted variance:  {format_metric('time_weighted_variance')}")
+    print(f"Time-weighted std. dev.: {format_metric('time_weighted_std_dev')}")
+    print(f"Minimum:                 {format_metric('minimum')}")
+    print(f"Maximum:                 {format_metric('maximum')}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -2327,6 +2416,15 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=None,
         help="reject samples below this digit confidence; profile default if omitted",
+    )
+    parser.add_argument(
+        "--summary-min-confidence",
+        type=float,
+        default=0.20,
+        help=(
+            "exclude final intervals below this confidence from summary "
+            "statistics only (default: 0.20)"
+        ),
     )
     parser.add_argument(
         "--decimal-switch-penalty",
@@ -2410,6 +2508,10 @@ def validate_args(args: argparse.Namespace) -> None:
         raise RuntimeError("--min-interval cannot be negative.")
     if args.min_confidence is not None and not 0.0 <= args.min_confidence <= 1.0:
         raise RuntimeError("--min-confidence must be between 0 and 1.")
+    if not 0.0 <= args.summary_min_confidence <= 1.0:
+        raise RuntimeError(
+            "--summary-min-confidence must be between 0 and 1."
+        )
     if args.decimal_switch_penalty < 0:
         raise RuntimeError("--decimal-switch-penalty cannot be negative.")
     for program in ("ffmpeg", "ffprobe"):
@@ -2596,6 +2698,7 @@ def main() -> int:
             info.duration,
             display_found_fraction,
             recognized_fraction,
+            summary_min_confidence=args.summary_min_confidence,
         )
         summary_path.parent.mkdir(parents=True, exist_ok=True)
         summary_path.write_text(
