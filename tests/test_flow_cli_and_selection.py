@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import re
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -18,8 +19,13 @@ class FlowCliAndSelectionTest(unittest.TestCase):
         stderr = io.StringIO()
         with self.assertRaises(SystemExit), mock.patch("sys.stderr", stderr):
             flow.parse_wrapper_args([])
-        self.assertEqual(
+        usage_line = re.sub(
+            r"\x1b\[[0-9;]*m",
+            "",
             stderr.getvalue().splitlines()[0],
+        )
+        self.assertEqual(
+            usage_line,
             "usage: python3 dosimeter_get_values_flow.py "
             "<video file> <output file> [options]",
         )
