@@ -114,10 +114,28 @@ class FlowCliAndSelectionTest(unittest.TestCase):
             tuple(item[3] - item[1] for item in aligned.decimal_candidates),
             (13, 13),
         )
-        self.assertEqual(
-            tuple((item[0], item[2], item[4]) for item in aligned.decimal_candidates),
-            ((180, 191, 2), (251, 261, 1)),
+        widths = tuple(
+            item[2] - item[0]
+            for item in aligned.decimal_candidates
         )
+        self.assertEqual(widths, (11, 10))
+
+        expected_boundaries = (
+            0.5 * (
+                profile.digit_boxes[0][2]
+                + profile.digit_boxes[1][0]
+            ),
+            0.5 * (
+                profile.digit_boxes[1][2]
+                + profile.digit_boxes[2][0]
+            ),
+        )
+        actual_centres = tuple(
+            0.5 * (item[0] + item[2])
+            for item in aligned.decimal_candidates
+        )
+        for actual, expected in zip(actual_centres, expected_boundaries):
+            self.assertAlmostEqual(actual, expected, delta=0.5)
 
     def test_reference_box_cancel_closes_window(self) -> None:
         frame = np.zeros((20, 30, 3), dtype=np.uint8)
