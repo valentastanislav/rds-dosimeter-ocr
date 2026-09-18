@@ -202,13 +202,36 @@ RDS-200 decoder
 
 General decoding
   --profile {rds200,rds30}
+      Dosimeter profile (default: rds200).
+
   --decimal-places {auto,0,1,2,3}
+      Decimal-point handling (default: auto).
+
   --contrast {auto,none,clahe}
+      Digit contrast handling (default: auto).
+
   --min-confidence VALUE
+      Reject raw samples below this digit confidence.
+      Profile default: 0.20 for both RDS-200 and RDS-30.
+
+  --summary-min-confidence VALUE
+      Exclude final intervals below this confidence from summary statistics
+      only; interval CSV/debug output is unchanged (default: 0.20).
+
   --filter-window N
+      Temporal segment-filter window.
+      Profile default: RDS-200 = 1, RDS-30 = 5.
+
   --mode-window N
+      Temporal value-mode window.
+      Profile default: RDS-200 = 1, RDS-30 = 21.
+
   --sample-fps VALUE
+      Sampling rate.
+      Profile default: RDS-200 = 5 Hz, RDS-30 = 30 Hz.
+
   --processing-width PIXELS
+      Working video width (default: 540 px).
 
 Output
   --raw-output FILE
