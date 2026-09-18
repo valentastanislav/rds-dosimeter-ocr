@@ -13,7 +13,7 @@ import numpy as np
 
 import dosimeter_get_values_flow as flow
 import dosimeter_get_values_rectified as rectified
-import dosimeter_get_values_flow_digitshape as digitshape
+import dosimeter_get_values_fixedgrid as fixedgrid
 
 
 class FlowCliAndSelectionTest(unittest.TestCase):
@@ -84,55 +84,19 @@ class FlowCliAndSelectionTest(unittest.TestCase):
             specific[flow.core.SEGMENT_ORDER[0]],
         )
 
-    def test_decimal_candidates_align_with_transformed_bottom_segment(self) -> None:
-        bottom = np.asarray(
-            ((10, 120), (40, 120), (40, 129), (10, 129)),
-            dtype=np.int32,
+    def test_rds200_fixed_grid_derives_decimal_geometry(self) -> None:
+        grid = (
+            0.245436,
+            0.471910,
+            0.677485,
+            0.794944,
         )
-        per_digit = tuple(
-            {"d": bottom.copy()}
-            for _ in range(3)
-        )
-        profile = replace(
+        profile = fixedgrid.make_fixed_profile(
             flow.core.RDS200,
-            canonical_height=356,
-            digit_boxes=(
-                (122, 166, 194, 279),
-                (192, 166, 264, 279),
-                (262, 166, 334, 279),
-            ),
-            digit_segment_polygons=per_digit,
-            decimal_candidates=(
-                (180, 246, 191, 259, 2),
-                (251, 246, 261, 259, 1),
-            ),
+            grid,
         )
 
-        aligned = digitshape.align_decimal_candidates_to_bottom_segments(
-            profile
-        )
-
-        expected_y2 = round(
-            np.median(
-                [
-                    y1 + 129 * (y2 - y1) / 130.0
-                    for _x1, y1, _x2, y2 in profile.digit_boxes
-                ]
-            )
-        )
-        self.assertEqual(
-            tuple(item[3] for item in aligned.decimal_candidates),
-            (expected_y2, expected_y2),
-        )
-        self.assertEqual(
-            tuple(item[3] - item[1] for item in aligned.decimal_candidates),
-            (13, 13),
-        )
-        widths = tuple(
-            item[2] - item[0]
-            for item in aligned.decimal_candidates
-        )
-        self.assertEqual(widths, (11, 10))
+        self.assertIsNotNone(profile.digit_segment_polygons)
 
         expected_boundaries = (
             0.5 * (
@@ -146,10 +110,74 @@ class FlowCliAndSelectionTest(unittest.TestCase):
         )
         actual_centres = tuple(
             0.5 * (item[0] + item[2])
-            for item in aligned.decimal_candidates
+            for item in profile.decimal_candidates
         )
-        for actual, expected in zip(actual_centres, expected_boundaries):
-            self.assertAlmostEqual(actual, expected, delta=0.5)
+
+        for actual, expected in zip(
+            actual_centres,
+            expected_boundaries,
+        ):
+            self.assertAlmostEqual(
+                actual,
+                expected,
+                delta=0.5,
+            )
+
+        bottom_edges = []
+        for digit_box, polygons in zip(
+            profile.digit_boxes,
+            profile.digit_segment_polygons,
+        ):
+            _x1, y1, _x2, y2 = digit_box
+            local_bottom = float(
+                np.max(
+                    np.asarray(
+                        polygons["d"]
+                    )[:, 1]
+                )
+            )
+            bottom_edges.append(
+                y1
+                + local_bottom
+                * (y2 - y1)
+                / 130.0
+            )
+
+        expected_y2 = round(
+            float(np.median(bottom_edges))
+        )
+        self.assertEqual(
+            tuple(
+                item[3]
+                for item in profile.decimal_candidates
+            ),
+            (expected_y2, expected_y2),
+        )
+
+    def test_rds200_feature_mask_uses_outer_ring_only(self) -> None:
+        shape = (400, 600)
+        box = (200, 100, 120, 80)
+        mask = flow.make_feature_mask(
+            shape,
+            box,
+            flow.core.RDS200,
+        )
+
+        x, y, width, height = box
+        self.assertEqual(
+            int(np.count_nonzero(
+                mask[
+                    y:y + height,
+                    x:x + width,
+                ]
+            )),
+            0,
+        )
+
+        self.assertGreater(
+            int(np.count_nonzero(mask)),
+            0,
+        )
 
     def test_reference_box_cancel_closes_window(self) -> None:
         frame = np.zeros((20, 30, 3), dtype=np.uint8)
