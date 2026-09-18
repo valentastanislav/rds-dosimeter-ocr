@@ -190,6 +190,17 @@ class Rds200GridRefinementSweepTest(unittest.TestCase):
             name: polygon.copy()
             for name, polygon in original.segment_polygons.items()
         }
+        digit_polygons_before = (
+            None
+            if original.digit_segment_polygons is None
+            else tuple(
+                {
+                    name: polygon.copy()
+                    for name, polygon in digit.items()
+                }
+                for digit in original.digit_segment_polygons
+            )
+        )
 
         frozen = make_frozen_rds200_profile(original)
         candidate = fixed.make_fixed_profile(
@@ -200,7 +211,19 @@ class Rds200GridRefinementSweepTest(unittest.TestCase):
         self.assertIsNot(frozen, original)
         self.assertIsNot(candidate, frozen)
         self.assertEqual(original.digit_boxes, boxes_before)
-        self.assertIsNone(original.digit_segment_polygons)
+        if digit_polygons_before is None:
+            self.assertIsNone(original.digit_segment_polygons)
+        else:
+            self.assertIsNotNone(original.digit_segment_polygons)
+            for current_digit, before_digit in zip(
+                original.digit_segment_polygons,
+                digit_polygons_before,
+            ):
+                for name, polygon in before_digit.items():
+                    np.testing.assert_array_equal(
+                        current_digit[name],
+                        polygon,
+                    )
         for name, polygon in polygons_before.items():
             np.testing.assert_array_equal(original.segment_polygons[name], polygon)
 
