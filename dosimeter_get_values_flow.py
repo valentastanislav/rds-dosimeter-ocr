@@ -2660,6 +2660,10 @@ def main(
                 for value in decimal_places_sequence
             )
 
+        # Default decoder path must always be defined.  Experimental
+        # strategies below replace it only when explicitly requested.
+        selected_decode_samples = core.decode_samples
+
         if wrapper_args.decoder_strategy == "rds30-joint-spatial":
             from dosimeter_rds30_joint_spatial import (
                 make_joint_spatial_decoder,
