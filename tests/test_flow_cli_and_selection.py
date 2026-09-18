@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import re
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest import mock
 
@@ -78,8 +79,8 @@ class FlowCliAndSelectionTest(unittest.TestCase):
             {"d": bottom.copy()}
             for _ in range(3)
         )
-        profile = SimpleNamespace(
-            name="rds200",
+        profile = replace(
+            flow.core.RDS200,
             canonical_height=356,
             digit_boxes=(
                 (122, 166, 194, 279),
