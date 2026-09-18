@@ -6,6 +6,7 @@ import io
 import re
 import unittest
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -177,6 +178,73 @@ class FlowCliAndSelectionTest(unittest.TestCase):
         self.assertGreater(
             int(np.count_nonzero(mask)),
             0,
+        )
+
+    def test_summary_confidence_cut_excludes_low_confidence_interval(self) -> None:
+        intervals = (
+            (
+                0.0,
+                9.0,
+                flow.core.Run(
+                    start_index=0,
+                    end_index=45,
+                    value=20.0,
+                    confidence=0.90,
+                ),
+            ),
+            (
+                9.0,
+                10.0,
+                flow.core.Run(
+                    start_index=45,
+                    end_index=50,
+                    value=40.0,
+                    confidence=0.10,
+                ),
+            ),
+        )
+
+        summary = flow.core.calculate_summary(
+            intervals,
+            Path("example.MOV"),
+            flow.core.RDS200,
+            10.0,
+            1.0,
+            1.0,
+            summary_min_confidence=0.20,
+        )
+
+        self.assertAlmostEqual(
+            summary["time_weighted_mean"],
+            20.0,
+        )
+        self.assertAlmostEqual(
+            summary["time_weighted_std_dev"],
+            0.0,
+        )
+        self.assertEqual(
+            summary["summary_interval_count"],
+            1,
+        )
+        self.assertAlmostEqual(
+            summary["summary_included_duration_s"],
+            9.0,
+        )
+        self.assertAlmostEqual(
+            summary["summary_excluded_duration_s"],
+            1.0,
+        )
+
+    def test_roi_summary_confidence_default_is_point_two(self) -> None:
+        args = rectified.roi_app.parse_args(
+            (
+                "video.MOV",
+                "out.csv",
+            )
+        )
+        self.assertAlmostEqual(
+            args.summary_min_confidence,
+            0.20,
         )
 
     def test_reference_box_cancel_closes_window(self) -> None:
