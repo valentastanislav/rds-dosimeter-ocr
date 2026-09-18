@@ -88,15 +88,21 @@ class Rds200PatternRefinementTest(unittest.TestCase):
                 ),
             )
 
-    def test_cli_flag_is_opt_in(self) -> None:
+    def test_cli_pattern_refinement_override_is_tristate(self) -> None:
         default, remaining = flow.parse_wrapper_args(("--track-time", "1.0"))
-        self.assertFalse(default.rds200_pattern_refinement)
+        self.assertIsNone(default.rds200_pattern_refinement)
         self.assertEqual(remaining, [])
 
         enabled, remaining = flow.parse_wrapper_args(
             ("--rds200-pattern-refinement", "--track-time", "1.0")
         )
         self.assertTrue(enabled.rds200_pattern_refinement)
+        self.assertEqual(remaining, [])
+
+        disabled, remaining = flow.parse_wrapper_args(
+            ("--no-rds200-pattern-refinement", "--track-time", "1.0")
+        )
+        self.assertFalse(disabled.rds200_pattern_refinement)
         self.assertEqual(remaining, [])
 
 if __name__ == "__main__":
