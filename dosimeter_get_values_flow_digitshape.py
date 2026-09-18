@@ -48,18 +48,7 @@ def parse_args(argv: list[str]):
         default=1.15,
         help=(
             "shared horizontal expansion of each digit mask around its own "
-            "x anchor (default: 1.15); ignored when "
-            "--digit-mask-x-stretches is supplied"
-        ),
-    )
-    parser.add_argument(
-        "--digit-mask-x-stretches",
-        type=parse_three_floats,
-        default=None,
-        metavar="LEFT,MIDDLE,RIGHT",
-        help=(
-            "optional per-digit horizontal expansions; useful when the "
-            "outer digits need slightly different fan-out"
+            "x anchor (default: 1.15)"
         ),
     )
     parser.add_argument(
@@ -96,14 +85,9 @@ def parse_args(argv: list[str]):
 def main() -> int:
     args, remaining = parse_args(sys.argv[1:])
 
-    x_stretches = (
-        args.digit_mask_x_stretches
-        if args.digit_mask_x_stretches is not None
-        else (args.digit_mask_x_stretch,) * 3
-    )
-    if any(value <= 0.0 for value in x_stretches):
+    if args.digit_mask_x_stretch <= 0.0:
         print(
-            "Error: digit-mask x stretch values must be positive.",
+            "Error: --digit-mask-x-stretch must be positive.",
             file=sys.stderr,
         )
         return 1
@@ -121,8 +105,8 @@ def main() -> int:
     ):
         per_digit = []
 
-        for digit_index, (anchor_x, x_offset, x_stretch) in enumerate(
-            zip(args.digit_mask_anchor_xs, x_offsets, x_stretches)
+        for digit_index, (anchor_x, x_offset) in enumerate(
+            zip(args.digit_mask_anchor_xs, x_offsets)
         ):
             digit_polygons = {}
 
@@ -134,7 +118,7 @@ def main() -> int:
                 # the three masks outward from the centre of the display.
                 points[:, 0] = (
                     anchor_x
-                    + x_stretch
+                    + args.digit_mask_x_stretch
                     * (points[:, 0] - anchor_x)
                     + x_offset
                 )
@@ -156,10 +140,7 @@ def main() -> int:
         )
 
     print("Experimental anchored per-digit mask scaling:")
-    print(
-        "  x stretches: "
-        + ",".join(f"{value:.3f}" for value in x_stretches)
-    )
+    print(f"  x stretch : {args.digit_mask_x_stretch:.3f}")
     print(f"  y stretch : {args.digit_mask_y_stretch:.3f}")
     print(
         "  x anchors : "
