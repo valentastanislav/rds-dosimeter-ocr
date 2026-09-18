@@ -82,6 +82,56 @@ def parse_args(argv: list[str]):
     return parser.parse_known_args(argv)
 
 
+def align_decimal_candidates_to_bottom_segments(profile):
+    """Align RDS-200 decimal sampling boxes with the final bottom segment.
+
+    The decimal point is part of the same physical LCD glyph geometry as the
+    digits. After the anchored per-digit mask transform, keep each decimal
+    candidate's horizontal position and height, but move it vertically so its
+    lower edge coincides with the lower edge of transformed segment d. The
+    same adjusted boxes are then used by both OCR sampling and debug overlay.
+    """
+
+    per_digit = getattr(profile, "digit_segment_polygons", None)
+    candidates = getattr(profile, "decimal_candidates", ())
+
+    if profile.name != "rds200" or not per_digit or not candidates:
+        return profile
+
+    bottom_edges = []
+
+    for digit_box, polygons in zip(profile.digit_boxes, per_digit):
+        if "d" not in polygons:
+            continue
+
+        _x1, y1, _x2, y2 = digit_box
+        box_height = max(1, y2 - y1)
+        local_bottom = float(np.max(np.asarray(polygons["d"])[:, 1]))
+        bottom_edges.append(
+            y1 + local_bottom * box_height / 130.0
+        )
+
+    if not bottom_edges:
+        return profile
+
+    target_y2 = int(round(float(np.median(bottom_edges))))
+    target_y2 = max(1, min(int(profile.canonical_height), target_y2))
+
+    aligned = []
+    for x1, old_y1, x2, old_y2, decimal_places in candidates:
+        height = max(1, old_y2 - old_y1)
+        new_y2 = target_y2
+        new_y1 = max(0, new_y2 - height)
+        aligned.append(
+            (x1, new_y1, x2, new_y2, decimal_places)
+        )
+
+    return replace(
+        profile,
+        decimal_candidates=tuple(aligned),
+    )
+
+
 def main() -> int:
     args, remaining = parse_args(sys.argv[1:])
 
@@ -96,7 +146,10 @@ def main() -> int:
         return 1
 
     tight = ringtrack.segmentshape.tight
+    flow = tight.diag.flow
+    fixed_app = flow.fixed_app
     original_make_digit_offset_profile = tight.make_digit_offset_profile
+    original_make_fixed_profile = fixed_app.make_fixed_profile
 
     def make_anchored_digit_profile(
         profile,
@@ -139,6 +192,23 @@ def main() -> int:
             digit_segment_polygons=tuple(per_digit),
         )
 
+    def make_fixed_profile_with_decimal_alignment(profile, grid):
+        fixed_profile = original_make_fixed_profile(profile, grid)
+        aligned_profile = align_decimal_candidates_to_bottom_segments(
+            fixed_profile
+        )
+
+        if aligned_profile.decimal_candidates != fixed_profile.decimal_candidates:
+            print("RDS-200 decimal geometry aligned to bottom segment:")
+            for old, new in zip(
+                fixed_profile.decimal_candidates,
+                aligned_profile.decimal_candidates,
+            ):
+                print(f"  {old} -> {new}")
+            print()
+
+        return aligned_profile
+
     print("Experimental anchored per-digit mask scaling:")
     print(f"  x stretch : {args.digit_mask_x_stretch:.3f}")
     print(f"  y stretch : {args.digit_mask_y_stretch:.3f}")
@@ -151,12 +221,14 @@ def main() -> int:
 
     saved_argv = sys.argv
     tight.make_digit_offset_profile = make_anchored_digit_profile
+    fixed_app.make_fixed_profile = make_fixed_profile_with_decimal_alignment
     sys.argv = [saved_argv[0], *remaining]
 
     try:
         return ringtrack.main()
     finally:
         tight.make_digit_offset_profile = original_make_digit_offset_profile
+        fixed_app.make_fixed_profile = original_make_fixed_profile
         sys.argv = saved_argv
 
 
