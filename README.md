@@ -305,7 +305,7 @@ Run the full unit-test suite with:
 PYTHONPATH=. python3 -m unittest discover -s tests
 ```
 
-At the current RDS-200 beta checkpoint the suite contains 43 passing tests.
+At the current RDS-200 beta checkpoint the suite contains 47 passing tests.
 
 ## Production and development files
 
@@ -342,7 +342,13 @@ Historical pre-cleanup snapshot:
 pre-cleanup-2026-09-07
 ```
 
-A dedicated RDS-200 beta tag should be created only after the beta branch is merged and the final test/help checks pass.
+Current RDS-200 beta checkpoint:
+
+```text
+rds200-beta-2026-09-18
+```
+
+This annotated tag points to commit `a90248c`, which includes the merged RDS-200 beta pipeline and the committed RDS-200 validation ground-truth files.
 
 ## Development principle
 
