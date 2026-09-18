@@ -33,6 +33,20 @@ class FlowCliAndSelectionTest(unittest.TestCase):
         )
 
 
+    def test_default_decoder_strategy_initializes_decode_function(self) -> None:
+        args = SimpleNamespace(
+            decoder_strategy="default",
+            rds200_pattern_refinement=False,
+        )
+        selected_decode_samples = flow.core.decode_samples
+
+        if args.decoder_strategy == "rds30-joint-spatial":
+            self.fail("unexpected joint-spatial strategy")
+        elif args.rds200_pattern_refinement:
+            self.fail("unexpected RDS-200 refinement strategy")
+
+        self.assertIs(selected_decode_samples, flow.core.decode_samples)
+
     def test_debug_geometry_uses_per_digit_segment_polygons(self) -> None:
         display = np.zeros((130, 65), dtype=np.uint8)
         shared = {
