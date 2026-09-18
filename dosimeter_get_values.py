@@ -133,6 +133,44 @@ RDS200_SEGMENTS = {
     "g": np.array([[20, 63], [43, 62], [40, 71], [18, 72]], np.int32),
 }
 
+# Validated RDS-200 per-digit sampling geometry for a tight manual grid.
+#
+# These polygons are the frozen result of the geometry-refinement branch:
+# the legacy masks are first adapted to the tight grid and then coherently
+# expanded around per-digit anchors (left: bottom-right, middle: bottom-centre,
+# right: bottom-left).  Keeping the final polygons here makes the production
+# geometry explicit and removes the experimental wrapper stack.
+RDS200_DIGIT_SEGMENTS = (
+    {
+        "a": np.array([[21, 0], [49, 0], [46, 11], [19, 11]], np.int32),
+        "b": np.array([[47, 7], [56, 10], [52, 50], [43, 48]], np.int32),
+        "c": np.array([[41, 71], [50, 67], [47, 114], [38, 120]], np.int32),
+        "d": np.array([[10, 111], [41, 111], [38, 125], [8, 125]], np.int32),
+        "e": np.array([[7, 71], [16, 65], [12, 111], [3, 118]], np.int32),
+        "f": np.array([[10, 7], [19, 4], [16, 48], [7, 54]], np.int32),
+        "g": np.array([[18, 54], [44, 53], [41, 67], [16, 68]], np.int32),
+    },
+    {
+        "a": np.array([[26, 0], [54, 0], [50, 11], [24, 11]], np.int32),
+        "b": np.array([[52, 7], [61, 10], [57, 50], [48, 48]], np.int32),
+        "c": np.array([[46, 71], [55, 67], [52, 114], [42, 120]], np.int32),
+        "d": np.array([[15, 111], [46, 111], [42, 125], [12, 125]], np.int32),
+        "e": np.array([[11, 71], [20, 65], [17, 111], [8, 118]], np.int32),
+        "f": np.array([[15, 7], [24, 4], [20, 48], [11, 54]], np.int32),
+        "g": np.array([[23, 54], [49, 53], [46, 67], [20, 68]], np.int32),
+    },
+    {
+        "a": np.array([[32, 0], [60, 0], [56, 11], [30, 11]], np.int32),
+        "b": np.array([[57, 7], [64, 10], [63, 50], [54, 48]], np.int32),
+        "c": np.array([[52, 71], [61, 67], [57, 114], [48, 120]], np.int32),
+        "d": np.array([[21, 111], [52, 111], [48, 125], [18, 125]], np.int32),
+        "e": np.array([[17, 71], [26, 65], [23, 111], [14, 118]], np.int32),
+        "f": np.array([[21, 7], [30, 4], [26, 48], [17, 54]], np.int32),
+        "g": np.array([[29, 54], [55, 53], [52, 67], [26, 68]], np.int32),
+    },
+)
+
+
 RDS200 = Profile(
     name="rds200",
     canonical_width=493,
@@ -160,14 +198,15 @@ RDS200 = Profile(
         (255, 241, 264, 256, 1),  # decimal point after the second digit
     ),
     default_sample_fps=5.0,
-    default_filter_window=5,
+    default_filter_window=1,
     temporal_filter="median",
     digit_patterns=STANDARD_DIGIT_PATTERNS,
     decoder="pattern",
-    adaptive_y_shift=True,
-    y_shift_min=-22,
-    y_shift_max=10,
+    adaptive_y_shift=False,
+    y_shift_min=0,
+    y_shift_max=0,
     default_min_confidence=0.20,
+    digit_segment_polygons=RDS200_DIGIT_SEGMENTS,
 )
 
 # RDS-30: the digit geometry is wider and slightly more trapezoidal.
@@ -2216,13 +2255,61 @@ def calculate_summary(
     duration: float,
     display_found_fraction: float,
     recognized_fraction: float,
+    summary_min_confidence: float = 0.20,
 ) -> dict[str, object]:
-    values = np.asarray([run.value for _, _, run in intervals], dtype=float)
-    weights = np.asarray([end - start for start, end, _ in intervals], dtype=float)
-    total_weight = float(np.sum(weights))
+    selected_intervals = [
+        (start, end, run)
+        for start, end, run in intervals
+        if run.confidence >= summary_min_confidence
+    ]
 
-    mean = float(np.sum(values * weights) / total_weight)
-    variance = float(np.sum(weights * (values - mean) ** 2) / total_weight)
+    included_duration = float(
+        sum(
+            end - start
+            for start, end, _run in selected_intervals
+        )
+    )
+    excluded_duration = max(
+        0.0,
+        float(duration) - included_duration,
+    )
+
+    if included_duration > 0.0:
+        values = np.asarray(
+            [
+                run.value
+                for _, _, run in selected_intervals
+            ],
+            dtype=float,
+        )
+        weights = np.asarray(
+            [
+                end - start
+                for start, end, _ in selected_intervals
+            ],
+            dtype=float,
+        )
+
+        mean = float(
+            np.sum(values * weights)
+            / included_duration
+        )
+        variance = float(
+            np.sum(
+                weights
+                * (values - mean) ** 2
+            )
+            / included_duration
+        )
+        std_dev: float | None = math.sqrt(variance)
+        minimum: float | None = float(np.min(values))
+        maximum: float | None = float(np.max(values))
+    else:
+        mean = None
+        variance = None
+        std_dev = None
+        minimum = None
+        maximum = None
 
     return {
         "input_video": str(video),
@@ -2231,11 +2318,25 @@ def calculate_summary(
         "display_found_fraction": display_found_fraction,
         "recognized_fraction": recognized_fraction,
         "interval_count": len(intervals),
+        "summary_min_confidence": summary_min_confidence,
+        "summary_interval_count": len(selected_intervals),
+        "summary_included_duration_s": included_duration,
+        "summary_excluded_duration_s": excluded_duration,
+        "summary_included_fraction": (
+            included_duration / duration
+            if duration > 0.0
+            else 0.0
+        ),
+        "summary_excluded_fraction": (
+            excluded_duration / duration
+            if duration > 0.0
+            else 0.0
+        ),
         "time_weighted_mean": mean,
         "time_weighted_variance": variance,
-        "time_weighted_std_dev": math.sqrt(variance),
-        "minimum": float(np.min(values)),
-        "maximum": float(np.max(values)),
+        "time_weighted_std_dev": std_dev,
+        "minimum": minimum,
+        "maximum": maximum,
     }
 
 
@@ -2244,12 +2345,39 @@ def print_summary(summary: dict[str, object]) -> None:
     print(f"Display found:           {100 * float(summary['display_found_fraction']):10.2f} %")
     print(f"Recognized samples:      {100 * float(summary['recognized_fraction']):10.2f} %")
     print(f"Number of intervals:     {int(summary['interval_count']):10d}")
+    print(
+        "Summary confidence cut: "
+        f"{float(summary['summary_min_confidence']):10.3f}"
+    )
+    print(
+        "Summary intervals used: "
+        f"{int(summary['summary_interval_count']):10d}"
+    )
+    print(
+        "Summary duration used:  "
+        f"{float(summary['summary_included_duration_s']):10.3f} s "
+        f"({100 * float(summary['summary_included_fraction']):.2f} %)"
+    )
+    print(
+        "Summary duration excl.: "
+        f"{float(summary['summary_excluded_duration_s']):10.3f} s "
+        f"({100 * float(summary['summary_excluded_fraction']):.2f} %)"
+    )
     print()
-    print(f"Time-weighted mean:      {float(summary['time_weighted_mean']):10.5g}")
-    print(f"Time-weighted variance:  {float(summary['time_weighted_variance']):10.5g}")
-    print(f"Time-weighted std. dev.: {float(summary['time_weighted_std_dev']):10.5g}")
-    print(f"Minimum:                 {float(summary['minimum']):10.5g}")
-    print(f"Maximum:                 {float(summary['maximum']):10.5g}")
+
+    def format_metric(name: str) -> str:
+        value = summary[name]
+        return (
+            "       n/a"
+            if value is None
+            else f"{float(value):10.5g}"
+        )
+
+    print(f"Time-weighted mean:      {format_metric('time_weighted_mean')}")
+    print(f"Time-weighted variance:  {format_metric('time_weighted_variance')}")
+    print(f"Time-weighted std. dev.: {format_metric('time_weighted_std_dev')}")
+    print(f"Minimum:                 {format_metric('minimum')}")
+    print(f"Maximum:                 {format_metric('maximum')}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -2288,6 +2416,15 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=None,
         help="reject samples below this digit confidence; profile default if omitted",
+    )
+    parser.add_argument(
+        "--summary-min-confidence",
+        type=float,
+        default=0.20,
+        help=(
+            "exclude final intervals below this confidence from summary "
+            "statistics only (default: 0.20)"
+        ),
     )
     parser.add_argument(
         "--decimal-switch-penalty",
@@ -2371,6 +2508,10 @@ def validate_args(args: argparse.Namespace) -> None:
         raise RuntimeError("--min-interval cannot be negative.")
     if args.min_confidence is not None and not 0.0 <= args.min_confidence <= 1.0:
         raise RuntimeError("--min-confidence must be between 0 and 1.")
+    if not 0.0 <= args.summary_min_confidence <= 1.0:
+        raise RuntimeError(
+            "--summary-min-confidence must be between 0 and 1."
+        )
     if args.decimal_switch_penalty < 0:
         raise RuntimeError("--decimal-switch-penalty cannot be negative.")
     for program in ("ffmpeg", "ffprobe"):
@@ -2557,6 +2698,7 @@ def main() -> int:
             info.duration,
             display_found_fraction,
             recognized_fraction,
+            summary_min_confidence=args.summary_min_confidence,
         )
         summary_path.parent.mkdir(parents=True, exist_ok=True)
         summary_path.write_text(

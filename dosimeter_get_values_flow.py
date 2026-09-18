@@ -120,6 +120,10 @@ ReferenceBoxSelector = Callable[
     [np.ndarray],
     ReferenceBox,
 ]
+DisplayCacheObserver = Callable[
+    [dict[int, np.ndarray], int, float],
+    None,
+]
 FLOW_CLI_USAGE = (
     "python3 dosimeter_get_values_flow.py "
     "<video file> <output file> [options]"
@@ -192,22 +196,47 @@ RDS-30 beta decoder
 
 RDS-200 decoder
   --decoder-strategy default
-      Historical RDS-200 decoder.
+      Production RDS-200 beta decoder.
 
   --rds200-pattern-refinement
-      Enable the opt-in RDS-200 binary-pattern refinement. It may strengthen
-      confidence for exact pattern matches and recover uniformly active digit 8.
-      Disabled by default.
+      Enable the RDS-200 binary-pattern refinement explicitly.
+
+  --no-rds200-pattern-refinement
+      Disable the RDS-200 binary-pattern refinement.
+      The refinement is enabled by default for the RDS-200 profile.
 
 General decoding
   --profile {rds200,rds30}
+      Dosimeter profile (default: rds200).
+
   --decimal-places {auto,0,1,2,3}
+      Decimal-point handling (default: auto).
+
   --contrast {auto,none,clahe}
+      Digit contrast handling (default: auto).
+
   --min-confidence VALUE
+      Reject raw samples below this digit confidence.
+      Profile default: 0.20 for both RDS-200 and RDS-30.
+
+  --summary-min-confidence VALUE
+      Exclude final intervals below this confidence from summary statistics
+      only; interval CSV/debug output is unchanged (default: 0.20).
+
   --filter-window N
+      Temporal segment-filter window.
+      Profile default: RDS-200 = 1, RDS-30 = 5.
+
   --mode-window N
+      Temporal value-mode window.
+      Profile default: RDS-200 = 1, RDS-30 = 21.
+
   --sample-fps VALUE
+      Sampling rate.
+      Profile default: RDS-200 = 5 Hz, RDS-30 = 30 Hz.
+
   --processing-width PIXELS
+      Working video width (default: 540 px).
 
 Output
   --raw-output FILE
@@ -220,6 +249,10 @@ Output
       Write interval debug images.
 
 Tracking
+  --flow-registration {cumulative,direct}
+      Profile default if omitted. RDS-200 uses direct reference registration
+      with cumulative fallback; RDS-30 keeps cumulative tracking.
+
   --flow-max-translation PIXELS
   --flow-max-rotation DEGREES
   --flow-min-scale VALUE
@@ -383,40 +416,38 @@ def parse_wrapper_args(
     parser.add_argument(
         "--flow-max-translation",
         type=float,
-        default=18.0,
+        default=None,
         help=(
-            "maximum frame-to-frame translation at processing "
-            "resolution (default: 18 px)"
+            "maximum accepted translation at processing resolution; "
+            "profile default if omitted"
         ),
     )
 
     parser.add_argument(
         "--flow-max-rotation",
         type=float,
-        default=2.5,
+        default=None,
         help=(
-            "maximum frame-to-frame rotation in degrees "
-            "(default: 2.5)"
+            "maximum accepted rotation in degrees; "
+            "profile default if omitted"
         ),
     )
 
     parser.add_argument(
         "--flow-min-scale",
         type=float,
-        default=0.975,
+        default=None,
         help=(
-            "minimum allowed frame-to-frame scale "
-            "(default: 0.975)"
+            "minimum accepted scale; profile default if omitted"
         ),
     )
 
     parser.add_argument(
         "--flow-max-scale",
         type=float,
-        default=1.025,
+        default=None,
         help=(
-            "maximum allowed frame-to-frame scale "
-            "(default: 1.025)"
+            "maximum accepted scale; profile default if omitted"
         ),
     )
 
@@ -441,6 +472,19 @@ def parse_wrapper_args(
     )
 
     parser.add_argument(
+        "--flow-registration",
+        choices=(
+            "cumulative",
+            "direct",
+        ),
+        default=None,
+        help=(
+            "registration strategy; profile default if omitted "
+            "(RDS-200: direct with cumulative fallback)"
+        ),
+    )
+
+    parser.add_argument(
         "--decoder-strategy",
         choices=(
             "default",
@@ -455,10 +499,21 @@ def parse_wrapper_args(
 
     parser.add_argument(
         "--rds200-pattern-refinement",
+        dest="rds200_pattern_refinement",
         action="store_true",
+        default=None,
         help=(
-            "enable the experimental RDS-200 pattern-decoder "
-            "confidence/8 refinement"
+            "enable the RDS-200 pattern-decoder refinement "
+            "(enabled by default for RDS-200)"
+        ),
+    )
+
+    parser.add_argument(
+        "--no-rds200-pattern-refinement",
+        dest="rds200_pattern_refinement",
+        action="store_false",
+        help=(
+            "disable the RDS-200 pattern-decoder refinement"
         ),
     )
 
@@ -669,15 +724,21 @@ def make_feature_mask(
         box
     )
 
+    padding = (
+        0.25
+        if profile.name == "rds200"
+        else 0.08
+    )
+
     pad_x = int(
         round(
-            0.08 * width
+            padding * width
         )
     )
 
     pad_y = int(
         round(
-            0.08 * height
+            padding * height
         )
     )
 
@@ -715,37 +776,45 @@ def make_feature_mask(
         -1,
     )
 
-    # Exclude the profile-specific changing numeric field.
-    (
-        exclusion_x1,
-        exclusion_y1,
-        exclusion_x2,
-        exclusion_y2,
-    ) = profile.flow_feature_exclusion_box
+    if profile.name == "rds200":
+        # The changing LCD graphics must not contribute RDS-200 tracking
+        # features.  Track only the static ring around the selected display.
+        inner_x1 = x
+        inner_y1 = y
+        inner_x2 = x + width
+        inner_y2 = y + height
+    else:
+        # Preserve the profile-specific exclusion used by RDS-30.
+        (
+            exclusion_x1,
+            exclusion_y1,
+            exclusion_x2,
+            exclusion_y2,
+        ) = profile.flow_feature_exclusion_box
 
-    inner_x1 = int(
-        round(
-            x + exclusion_x1 * width
+        inner_x1 = int(
+            round(
+                x + exclusion_x1 * width
+            )
         )
-    )
 
-    inner_x2 = int(
-        round(
-            x + exclusion_x2 * width
+        inner_x2 = int(
+            round(
+                x + exclusion_x2 * width
+            )
         )
-    )
 
-    inner_y1 = int(
-        round(
-            y + exclusion_y1 * height
+        inner_y1 = int(
+            round(
+                y + exclusion_y1 * height
+            )
         )
-    )
 
-    inner_y2 = int(
-        round(
-            y + exclusion_y2 * height
+        inner_y2 = int(
+            round(
+                y + exclusion_y2 * height
+            )
         )
-    )
 
     cv2.rectangle(
         mask,
@@ -1135,6 +1204,7 @@ def precompute_motion(
     maximum_scale: float,
     minimum_inliers: int,
     redetect_every: int,
+    registration_mode: str = "cumulative",
     manual_reference_box: ReferenceBox | None = None,
     reference_box_selector: ReferenceBoxSelector | None = None,
 ) -> tuple[
@@ -1514,6 +1584,90 @@ def precompute_motion(
         )
     )
 
+    if registration_mode == "direct":
+        cumulative_transforms = [
+            matrix.copy()
+            for matrix in transforms
+        ]
+
+        direct_stats: dict[
+            str,
+            float | int,
+        ] = {
+            "accepted": 0,
+            "rejected": 0,
+            "tracked_points_sum": 0,
+            "inliers_sum": 0,
+            "steps": 0,
+            "redetections": 0,
+            "direct_fallbacks": 0,
+        }
+
+        for current_index, current_gray in enumerate(
+            gray_frames
+        ):
+            if current_index == actual_reference_index:
+                transforms[current_index] = identity_matrix()
+                continue
+
+            (
+                accepted,
+                matrix,
+                _tracked_points,
+                number_tracked,
+                number_inliers,
+            ) = estimate_step(
+                reference_gray,
+                current_gray,
+                reference_points,
+                maximum_translation,
+                maximum_rotation,
+                minimum_scale,
+                maximum_scale,
+                minimum_inliers,
+            )
+
+            direct_stats["steps"] += 1
+            direct_stats["tracked_points_sum"] += number_tracked
+            direct_stats["inliers_sum"] += number_inliers
+
+            if accepted:
+                transforms[current_index] = matrix
+                direct_stats["accepted"] += 1
+            else:
+                transforms[current_index] = (
+                    cumulative_transforms[current_index]
+                )
+                direct_stats["rejected"] += 1
+                direct_stats["direct_fallbacks"] += 1
+
+        stats = direct_stats
+
+        print(
+            "Direct reference-registration diagnostics:",
+            file=sys.stderr,
+        )
+        print(
+            f"  reference frame      : {actual_reference_index}",
+            file=sys.stderr,
+        )
+        print(
+            f"  reference features   : {len(reference_points)}",
+            file=sys.stderr,
+        )
+        print(
+            f"  accepted direct fits : {stats['accepted']}",
+            file=sys.stderr,
+        )
+        print(
+            f"  rejected direct fits : {stats['rejected']}",
+            file=sys.stderr,
+        )
+        print(
+            f"  cumulative fallbacks : {stats['direct_fallbacks']}",
+            file=sys.stderr,
+        )
+
     return (
         transforms,
         reference_box,
@@ -1625,12 +1779,18 @@ def draw_decoder_geometry(
     # Digit boxes + seven-segment polygons
     # ----------------------------------------------------------
 
-    for (
+    per_digit_polygons = getattr(
+        profile,
+        "digit_segment_polygons",
+        None,
+    )
+
+    for digit_index, (
         x1,
         y1,
         x2,
         y2,
-    ) in profile.digit_boxes:
+    ) in enumerate(profile.digit_boxes):
 
         cv2.rectangle(
             overlay,
@@ -1670,15 +1830,22 @@ def draw_decoder_geometry(
             / 130.0
         )
 
+        polygons = (
+            per_digit_polygons[digit_index]
+            if per_digit_polygons is not None
+            else profile.segment_polygons
+        )
+
         for name in (
             core.SEGMENT_ORDER
         ):
 
             local = (
-                profile.segment_polygons[
-                    name
-                ].astype(
-                    float
+                np.asarray(
+                    polygons[
+                        name
+                    ],
+                    dtype=float,
                 )
             )
 
@@ -2235,6 +2402,7 @@ def main(
     argv: Sequence[str] | None = None,
     decode_samples: roi_app.DecodeSamples | None = None,
     profile_override: core.Profile | None = None,
+    display_cache_observer: DisplayCacheObserver | None = None,
 ) -> int:
 
     selected_argv = (
@@ -2343,6 +2511,41 @@ def main(
             profile,
         )
 
+        is_rds200 = (
+            profile.name == "rds200"
+        )
+
+        flow_max_translation = (
+            wrapper_args.flow_max_translation
+            if wrapper_args.flow_max_translation is not None
+            else (150.0 if is_rds200 else 18.0)
+        )
+        flow_max_rotation = (
+            wrapper_args.flow_max_rotation
+            if wrapper_args.flow_max_rotation is not None
+            else (10.0 if is_rds200 else 2.5)
+        )
+        flow_min_scale = (
+            wrapper_args.flow_min_scale
+            if wrapper_args.flow_min_scale is not None
+            else (0.85 if is_rds200 else 0.975)
+        )
+        flow_max_scale = (
+            wrapper_args.flow_max_scale
+            if wrapper_args.flow_max_scale is not None
+            else (1.15 if is_rds200 else 1.025)
+        )
+        flow_registration = (
+            wrapper_args.flow_registration
+            if wrapper_args.flow_registration is not None
+            else ("direct" if is_rds200 else "cumulative")
+        )
+        rds200_pattern_refinement = (
+            wrapper_args.rds200_pattern_refinement
+            if wrapper_args.rds200_pattern_refinement is not None
+            else is_rds200
+        )
+
         if (
             wrapper_args.joint_spatial_confidence is not None
             and not 0.0 <= wrapper_args.joint_spatial_confidence <= 1.0
@@ -2382,7 +2585,7 @@ def main(
             )
 
         if (
-            wrapper_args.rds200_pattern_refinement
+            rds200_pattern_refinement
             and profile.name != "rds200"
         ):
             raise RuntimeError(
@@ -2390,7 +2593,7 @@ def main(
             )
 
         if (
-            wrapper_args.rds200_pattern_refinement
+            rds200_pattern_refinement
             and wrapper_args.decoder_strategy != "default"
         ):
             raise RuntimeError(
@@ -2399,7 +2602,7 @@ def main(
             )
 
         if (
-            wrapper_args.rds200_pattern_refinement
+            rds200_pattern_refinement
             and decode_samples is not None
         ):
             raise RuntimeError(
@@ -2593,12 +2796,13 @@ def main(
             args.processing_width,
             sample_fps,
             track_time,
-            wrapper_args.flow_max_translation,
-            wrapper_args.flow_max_rotation,
-            wrapper_args.flow_min_scale,
-            wrapper_args.flow_max_scale,
+            flow_max_translation,
+            flow_max_rotation,
+            flow_min_scale,
+            flow_max_scale,
             wrapper_args.flow_min_inliers,
             wrapper_args.flow_redetect_every,
+            registration_mode=flow_registration,
             manual_reference_box=(
                 resolved_reference_box
                 if manual_reference_requested
@@ -2691,6 +2895,10 @@ def main(
                 for value in decimal_places_sequence
             )
 
+        # Default decoder path must always be defined.  Experimental
+        # strategies below replace it only when explicitly requested.
+        selected_decode_samples = core.decode_samples
+
         if wrapper_args.decoder_strategy == "rds30-joint-spatial":
             from dosimeter_rds30_joint_spatial import (
                 make_joint_spatial_decoder,
@@ -2714,7 +2922,7 @@ def main(
                     wrapper_args.joint_spatial_min_nine_margin
                 ),
             )
-        elif wrapper_args.rds200_pattern_refinement:
+        elif rds200_pattern_refinement:
             def selected_decode_samples(
                 samples,
                 in_profile,
@@ -2923,6 +3131,13 @@ def main(
                 ),
             )
         )
+
+        if result == 0 and display_cache_observer is not None:
+            display_cache_observer(
+                dict(display_cache),
+                len(transforms),
+                sample_fps,
+            )
 
         # ------------------------------------------------------
         # Diagnostics

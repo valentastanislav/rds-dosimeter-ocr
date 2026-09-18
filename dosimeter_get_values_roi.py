@@ -1259,6 +1259,16 @@ def parse_args(
     )
 
     parser.add_argument(
+        "--summary-min-confidence",
+        type=float,
+        default=0.20,
+        help=(
+            "exclude final intervals below this confidence from "
+            "summary statistics only (default: 0.20)"
+        ),
+    )
+
+    parser.add_argument(
         "--decimal-switch-penalty",
         type=float,
         default=4.0,
@@ -1438,6 +1448,15 @@ def validate_args(
     ):
         raise RuntimeError(
             "--min-confidence must be between 0 and 1."
+        )
+
+    if not (
+        0.0
+        <= args.summary_min_confidence
+        <= 1.0
+    ):
+        raise RuntimeError(
+            "--summary-min-confidence must be between 0 and 1."
         )
 
     if (
@@ -1974,6 +1993,9 @@ def main(
                 info.duration,
                 display_found_fraction,
                 recognized_fraction,
+                summary_min_confidence=(
+                    args.summary_min_confidence
+                ),
             )
         )
 

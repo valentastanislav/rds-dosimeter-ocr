@@ -1,98 +1,151 @@
 # RDS dosimeter OCR
 
-Experimental Python pipeline for extracting changing seven-segment readings from RADOS dosimeter videos.
+Python OCR pipeline for extracting changing seven-segment readings from hand-held videos of RADOS dosimeters.
 
-The repository currently contains working pipelines for the **RDS-30** and **RDS-200**. Current external testing is focused on the RDS-30 beta pipeline.
+The repository currently contains beta pipelines for **RDS-30** and **RDS-200**. Both use the same primary entry point:
 
-## Status
-
-### RDS-30 beta
-
-The current frozen RDS-30 decoder configuration uses:
-
-- optical-flow stabilization
-- manual reference display box
-- manual perspective quad
-- profile-defined digit/segment geometry
-- glyph-independent residual-geometry scoring
-- joint-spatial decoding
-- confidence rejection at `0.358`
-- weak-9 margin rejection at `0.400`
-
-The frozen algorithm is tagged as:
-
-```text
-rds30-gi-weak9-2026-09-11
+```bash
+python3 dosimeter_get_values_flow.py VIDEO.MOV intervals.csv [options]
 ```
 
-That tag points to the algorithmic freeze before independent validation. The current `main` branch contains the same algorithm plus validation metadata.
+The project is still beta software. Validation results are evidence for the tested videos, not a general accuracy guarantee.
 
-Independent validation on `IMG_0751.MOV` used ground truth prepared before OCR and produced:
-
-- 1088 stable samples
-- 1087 accepted samples
-- 1087 correct accepted samples
-- 0 wrong accepted samples
-- 99.91% stable-sample coverage
-- 100% accepted-sample accuracy
-
-This is still a beta result, not a claim of general performance. New videos from the same instrument type under different conditions are especially useful.
-
-### RDS-200 regression baseline
-
-The older RDS-200 pipeline is retained and regression-tested. Refactoring has preserved exact output parity with the historical 331-sample regression baseline.
-
-RDS-200 still uses a manually selected digit grid. RDS-30 does not.
-
-## Quick start for an RDS-30 beta test
-
-### 1. Clone the repository
+## Installation
 
 ```bash
 git clone https://github.com/valentastanislav/rds-dosimeter-ocr.git
 cd rds-dosimeter-ocr
-```
 
-For an exact checkout of the frozen RDS-30 algorithm:
-
-```bash
-git checkout rds30-gi-weak9-2026-09-11
-```
-
-The current `main` branch contains the same frozen algorithm plus the independent-validation files.
-
-### 2. Create a Python environment
-
-```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements.txt
 ```
 
-The Python dependencies are currently `numpy` and `opencv-python`.
+Python dependencies are currently `numpy` and `opencv-python`.
 
-The system also needs `ffmpeg` and `ffprobe` available on `PATH`.
-
-Examples:
+The system also needs `ffmpeg` and `ffprobe` on `PATH`.
 
 ```bash
-# macOS with Homebrew
+# macOS
 brew install ffmpeg
 
 # Debian/Ubuntu
 sudo apt install ffmpeg
 ```
 
-### 3. Choose a reference time
+## RDS-200 beta
 
-Pick a time in the video where the dosimeter display is clearly visible and reasonably sharp. For a first attempt, a value such as `20.0` seconds is usually convenient.
+The RDS-200 beta pipeline uses:
 
-This time is used only to define the reference geometry for tracking.
+- one manually selected reference display box;
+- one manually selected perspective quad;
+- one manually selected tight grid around the three large digits;
+- ring-only optical-flow features outside the changing LCD;
+- direct reference-to-frame registration with cumulative tracking as fallback;
+- profile-owned per-digit seven-segment sampling geometry;
+- automatic decimal-point detection for the two RDS-200 decimal positions;
+- RDS-200 pattern refinement enabled by default;
+- raw-sample confidence rejection at `0.20`;
+- final-summary confidence filtering at `0.20`.
 
-### 4. Run the frozen RDS-30 beta configuration
+The reference box, quad, and digit grid are **video-specific**. Do not copy them from one recording to another.
 
-Replace `my_video.MOV` with your video filename:
+### RDS-200 first run
+
+Choose a reference time where the display is clear and reasonably sharp. Then run:
+
+```bash
+python3 dosimeter_get_values_flow.py my_video.MOV rds200_intervals.csv \
+  --profile rds200 \
+  --track-time 20.0 \
+  --select-reference-box \
+  --select-quad \
+  --select-grid \
+  --decimal-places auto \
+  --contrast auto \
+  --raw-output rds200_raw.csv \
+  --debug-dir rds200_debug
+```
+
+The program prints reusable normalized values for:
+
+```text
+--reference-box ...
+--quad ...
+--grid ...
+```
+
+A reproducible rerun can use those values instead of the three interactive selectors.
+
+### RDS-200 tracking defaults
+
+Unless explicitly overridden, the RDS-200 profile uses:
+
+```text
+registration            direct reference -> frame
+fallback                cumulative frame-to-frame transform
+tracking feature region outside ring only
+ring padding             0.25 of reference-box size
+max translation          150 px
+max rotation             10 deg
+scale range              0.85 .. 1.15
+sample rate              5 Hz
+filter window            1
+mode window              1
+min confidence           0.20
+summary min confidence   0.20
+```
+
+These are profile defaults. They normally do not need to appear in the command line.
+
+### RDS-200 beta validation state
+
+The current configuration was regression-checked on several development/verification recordings spanning different display values and recording conditions, including `IMG_0742`, `IMG_0744`, `IMG_0747`, and `IMG_1151`.
+
+Examples from the stable-sample evaluator:
+
+- `IMG_0742`: 158/158 stable samples correct;
+- `IMG_0744`: 156 correct, 7 wrong, 1 missing out of 164 evaluated stable samples;
+- `IMG_0747`: 148 correct, 7 wrong, 4 missing out of 159 evaluated stable samples.
+
+The remaining RDS-200 errors are concentrated in difficult low-contrast/blurred frames. Low-confidence final intervals are retained in the interval CSV for transparency but can be excluded from physical summary statistics as described below.
+
+Do not tune the production geometry or decoder against these videos further; they are now consumed development/regression data.
+
+## RDS-30 beta
+
+The frozen RDS-30 configuration uses:
+
+- optical-flow stabilization;
+- manual reference display box;
+- manual perspective quad;
+- profile-defined digit geometry;
+- glyph-independent residual-geometry scoring;
+- joint-spatial decoding;
+- confidence rejection at `0.358`;
+- weak-9 margin rejection at `0.400`.
+
+The frozen algorithm tag is:
+
+```text
+rds30-gi-weak9-2026-09-11
+```
+
+Independent validation on `IMG_0751.MOV`, with ground truth prepared before OCR, produced:
+
+```text
+stable samples:        1088
+accepted / recognized: 1087
+correct accepted:      1087
+wrong accepted:           0
+stable coverage:        99.91 %
+accepted accuracy:     100.00 %
+```
+
+This is one independent validation recording, not a universal performance claim.
+
+### RDS-30 beta run
 
 ```bash
 python3 dosimeter_get_values_flow.py my_video.MOV rds30_intervals.csv \
@@ -104,25 +157,17 @@ python3 dosimeter_get_values_flow.py my_video.MOV rds30_intervals.csv \
   --joint-spatial-diagnostics-dir rds30_diagnostics
 ```
 
-For `--profile rds30`, the validated beta decoder configuration is now selected automatically: joint-spatial decoding, glyph-independent geometry emission, confidence threshold `0.358`, and weak-9 margin threshold `0.400`.
+For external beta validation, do not retune `0.358` or `0.400` after inspecting the result.
 
-These values can still be overridden explicitly from the command line; `--decoder-strategy default` selects the historical decoder.
-
-For a beta test, **do not tune `0.358` or `0.400` after looking at the result**. The point is to test the frozen configuration on genuinely new data.
+RDS-30 does **not** use a manual digit grid.
 
 ## Manual geometry
 
-The RDS-30 run above asks for two manual selections.
-
 ### Reference box
 
-`--select-reference-box` opens the reference frame and asks for a rectangular box.
+`--select-reference-box` asks for a loose rectangle containing the complete physical LCD/display plus a small visible margin.
 
-Select a **loose rectangle containing the complete physical LCD/display plus a small visible margin on all sides**.
-
-The box is only a carrier/crop region. Its edges do **not** need to coincide with the LCD edges.
-
-Conceptually:
+The box is a tracking/crop carrier. Its edges do not need to coincide with the LCD edges.
 
 ```text
 +---------------------------+   reference box
@@ -136,19 +181,11 @@ Conceptually:
 
 Do not select only the digits.
 
-The program prints the normalized result, for example:
-
-```text
---reference-box 0.307407,0.573958,0.696296,0.646875
-```
-
-Keep this line if you want to reproduce the run later without clicking again.
-
 ### Perspective quad
 
-`--select-quad` asks for the four **actual physical corners of the LCD inside the reference box**.
+`--select-quad` asks for the four actual physical LCD corners inside the reference box.
 
-Click them in this order:
+Click in this order:
 
 ```text
 1 = top-left
@@ -163,110 +200,167 @@ Click them in this order:
 4 ---------------- 3
 ```
 
-Use the LCD boundary, not the digit boundary, the instrument housing, or the reference-box edge.
+Use the physical LCD boundary, not the digit boundary, instrument housing, or reference-box edge.
 
-The program prints the normalized quad, for example:
+### RDS-200 digit grid
 
-```text
---quad 0.032520,0.067606,0.981707,0.067606,0.987805,0.932394,0.012195,0.923944
-```
+`--select-grid` is RDS-200 only.
 
-Selection can be cancelled with `C` or `Esc`.
+Select a **tight rectangle around all three large digits** in the rectified display. Do not include the scale/unit text or bezel. The decimal dots do not need to define the grid boundary.
 
-### No digit grid for RDS-30
+The selected grid is used to construct the three digit boxes; the decimal sampling positions are then derived consistently from the final digit geometry.
 
-Do **not** select a digit grid for the RDS-30. Digit positions and seven-segment geometry are part of the RDS-30 profile, including the possibly blank leading digit.
+## Confidence and summary statistics
 
-RDS-200 is different: it still requires a manual digit grid.
+Two different confidence thresholds intentionally exist.
 
-## Main outputs
+### `--min-confidence`
 
-For the example command above:
+This acts on **raw OCR samples** before interval reconstruction.
 
-- `rds30_intervals.csv` — reconstructed stable value intervals
-- `rds30_raw.csv` — sampled OCR values with at least `time_s`, `value`, and `confidence`
-- `rds30_diagnostics/` — joint-spatial geometry diagnostics, including `geometry.csv` and any requested preview diagnostics
-- terminal output — optical-flow tracking statistics and run diagnostics
-
-The raw output may contain rejected samples with no accepted value. This is intentional: the RDS-30 beta decoder is conservative and prefers rejecting uncertain frames over returning a likely wrong value.
-
-Therefore, recognition/coverage below 100% is not automatically a failure. For beta testing, wrong accepted values are more important than a modest number of rejected samples.
-
-## Optical-flow diagnostics
-
-A successful run prints tracking statistics such as:
+Profile default:
 
 ```text
-steps               : 2001
-accepted motion     : 2001
-rejected motion     : 0
-point redetections  : 210
-mean tracked pts    : 28.3
-mean RANSAC inliers : 28.3
+RDS-200: 0.20
+RDS-30:  0.20
 ```
 
-Frequent point redetection is normal. A large number of rejected motion steps, obvious tracking drift, or a badly rectified LCD is worth reporting.
+A raw sample below the threshold is rejected and written with no accepted value in the raw CSV.
 
-## Beta-test feedback
+### `--summary-min-confidence`
 
-For a useful external RDS-30 test, please keep the frozen decoder parameters unchanged and send back, if possible:
+Default:
 
-- the exact command used
-- the selected `--reference-box`
-- the selected `--quad`
-- terminal output
-- `rds30_intervals.csv`
-- `rds30_raw.csv`
-- `rds30_diagnostics/geometry.csv`
-- the original video, if it can be shared
+```text
+0.20
+```
 
-If true displayed values are known, the best validation procedure is to write them down independently **before inspecting the OCR output**.
+This acts only on the **final reconstructed intervals when calculating summary statistics**.
 
-Ground truth is used only for evaluation; it is not used by the production decoder.
+Intervals below the threshold:
 
-## Important files
+- remain in the interval CSV;
+- remain visible in debug output;
+- are excluded from time-weighted mean, variance, standard deviation, minimum, and maximum.
 
-- `dosimeter_get_values.py` — core profiles and decoding support
-- `dosimeter_get_values_flow.py` — optical-flow stabilization and primary video pipeline
-- `dosimeter_get_values_fixedgrid.py` — fixed digit geometry and segment measurement
-- `dosimeter_rds30_joint_spatial.py` — RDS-30 joint-spatial decoder
-- `tests/evaluate_dosimeter_ground_truth.py` — raw-sample benchmark evaluator
-- `tests/video_manifest.tsv` — development/validation video roles and recorded geometry
-- `tests/IMG_0751_true_values.txt` — independent RDS-30 validation ground truth
-- `docs/CURRENT_STATE.md` — historical development notes; some sections predate the current RDS-30 beta state
-- `AGENTS.md` — project/development context for coding agents
+The summary reports both included and excluded duration, so the quality cut is explicit rather than silently deleting OCR output.
+
+Set `--summary-min-confidence 0` if statistics over all final intervals are desired.
+
+## General decoding defaults
+
+```text
+option                     RDS-200      RDS-30
+------------------------------------------------
+--decimal-places           auto         auto
+--contrast                 auto         auto
+--min-confidence           0.20         0.20
+--summary-min-confidence   0.20         0.20
+--filter-window            1            5
+--mode-window              1            21
+--sample-fps               5 Hz         30 Hz
+--processing-width         540 px       540 px
+```
+
+Run:
+
+```bash
+python3 dosimeter_get_values_flow.py --help
+```
+
+for the complete current CLI help.
+
+## Outputs
+
+Typical outputs are:
+
+- `*_intervals.csv` — reconstructed value intervals;
+- `*_raw.csv` — every sampled OCR result before interval filling/merging;
+- `*.summary.json` — time-weighted statistics and quality-cut coverage;
+- `--debug-dir` — interval screenshots drawn from the exact cached main-pass displays used by OCR;
+- terminal output — geometry, tracking, recognition, and summary diagnostics.
+
+Debug geometry is required to correspond to the actual decoder geometry. It is not recomputed from a separate tracking pass.
+
+## Ground-truth evaluation
+
+If true displayed values are available, prepare them independently before inspecting OCR output when possible.
+
+Use:
+
+```bash
+python3 tests/evaluate_dosimeter_ground_truth.py \
+  tests/MY_VIDEO_true_values.txt \
+  my_raw.csv \
+  --guard 0.4
+```
+
+Ground truth is evaluation-only. It must not influence production tracking, geometry, decimal selection, confidence, acceptance, or expected value ranges.
+
+## Testing
+
+Run the full unit-test suite with:
+
+```bash
+PYTHONPATH=. python3 -m unittest discover -s tests
+```
+
+At the current RDS-200 beta checkpoint the suite contains 43 passing tests.
+
+## Production and development files
+
+Primary production files:
+
+- `dosimeter_get_values.py` — profiles, segment measurement, decoding, interval construction, summary statistics;
+- `dosimeter_get_values_flow.py` — primary stabilized video pipeline and user CLI;
+- `dosimeter_get_values_fixedgrid.py` — fixed-grid geometry and RDS-200 decimal geometry;
+- `dosimeter_get_values_roi.py` — ROI/front-end support;
+- `dosimeter_get_values_rectified.py` — perspective rectification;
+- `dosimeter_rds30_joint_spatial.py` — RDS-30 beta joint-spatial decoder.
+
+Development/evaluation support:
+
+- `dosimeter_get_values_flow_diag.py` — segment-level diagnostics;
+- `dosimeter_get_values_flow_tightsegments.py` — historical RDS-200 development geometry helper retained for development tests;
+- `tests/rds200_grid_refinement_sweep.py` — historical ground-truth-blind grid experiment;
+- `tests/evaluate_dosimeter_ground_truth.py` — stable-sample evaluator;
+- `tests/video_manifest.tsv` — recorded development/validation video roles and geometry.
+
+The removed experimental RDS-200 wrapper stack is no longer a supported user entry point. Beta users should run `dosimeter_get_values_flow.py` directly.
 
 ## Reproducibility checkpoints
 
-Two useful tags are kept in the repository:
-
-```text
-pre-cleanup-2026-09-07
-```
-
-Historical pre-cleanup snapshot at commit `eb003e7`.
+Historical RDS-30 tag:
 
 ```text
 rds30-gi-weak9-2026-09-11
 ```
 
-Frozen RDS-30 glyph-independent decoder with confidence threshold `0.358` and weak-9 margin threshold `0.400`.
+Historical pre-cleanup snapshot:
+
+```text
+pre-cleanup-2026-09-07
+```
+
+A dedicated RDS-200 beta tag should be created only after the beta branch is merged and the final test/help checks pass.
 
 ## Development principle
 
-The intended processing chain is:
+The intended production chain is:
 
 ```text
 video
-  -> geometry / stabilization
-  -> rectified display
+  -> stabilization
+  -> fixed reference crop
+  -> perspective rectification
   -> digit geometry
   -> segment measurement
   -> temporal filtering
   -> digit decoding
   -> decimal decoding
-  -> interval construction
+  -> interval reconstruction
+  -> confidence-qualified summary statistics
   -> diagnostics / output
 ```
 
-Ground-truth values must remain independent of production OCR logic.
+Keep geometry, OCR quality, confidence policy, and evaluation concerns separate. Do not compensate for poor geometry with video-specific decoder patches.
