@@ -194,9 +194,11 @@ RDS-200 decoder
       Historical RDS-200 decoder.
 
   --rds200-pattern-refinement
-      Enable the opt-in RDS-200 binary-pattern refinement. It may strengthen
-      confidence for exact pattern matches and recover uniformly active digit 8.
-      Disabled by default.
+      Enable the RDS-200 binary-pattern refinement explicitly.
+
+  --no-rds200-pattern-refinement
+      Disable the RDS-200 binary-pattern refinement.
+      The refinement is enabled by default for the RDS-200 profile.
 
 General decoding
   --profile {rds200,rds30}
@@ -219,6 +221,10 @@ Output
       Write interval debug images.
 
 Tracking
+  --flow-registration {cumulative,direct}
+      Profile default if omitted. RDS-200 uses direct reference registration
+      with cumulative fallback; RDS-30 keeps cumulative tracking.
+
   --flow-max-translation PIXELS
   --flow-max-rotation DEGREES
   --flow-min-scale VALUE
