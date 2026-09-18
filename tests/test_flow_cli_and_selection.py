@@ -14,6 +14,7 @@ import numpy as np
 
 import dosimeter_get_values_flow as flow
 import dosimeter_get_values_rectified as rectified
+import dosimeter_get_values_roi as roi
 import dosimeter_get_values_fixedgrid as fixedgrid
 
 
@@ -236,7 +237,7 @@ class FlowCliAndSelectionTest(unittest.TestCase):
         )
 
     def test_roi_summary_confidence_default_is_point_two(self) -> None:
-        args = rectified.roi_app.parse_args(
+        args = roi.parse_args(
             (
                 "video.MOV",
                 "out.csv",
