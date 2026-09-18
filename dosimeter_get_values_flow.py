@@ -1585,12 +1585,18 @@ def draw_decoder_geometry(
     # Digit boxes + seven-segment polygons
     # ----------------------------------------------------------
 
-    for (
+    per_digit_polygons = getattr(
+        profile,
+        "digit_segment_polygons",
+        None,
+    )
+
+    for digit_index, (
         x1,
         y1,
         x2,
         y2,
-    ) in profile.digit_boxes:
+    ) in enumerate(profile.digit_boxes):
 
         cv2.rectangle(
             overlay,
@@ -1630,15 +1636,22 @@ def draw_decoder_geometry(
             / 130.0
         )
 
+        polygons = (
+            per_digit_polygons[digit_index]
+            if per_digit_polygons is not None
+            else profile.segment_polygons
+        )
+
         for name in (
             core.SEGMENT_ORDER
         ):
 
             local = (
-                profile.segment_polygons[
-                    name
-                ].astype(
-                    float
+                np.asarray(
+                    polygons[
+                        name
+                    ],
+                    dtype=float,
                 )
             )
 
