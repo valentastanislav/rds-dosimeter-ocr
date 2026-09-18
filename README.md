@@ -153,10 +153,6 @@ python3 dosimeter_get_values_flow.py my_video.MOV rds30_intervals.csv \
   --track-time 20.0 \
   --select-reference-box \
   --select-quad \
-  --decoder-strategy rds30-joint-spatial \
-  --joint-spatial-geometry-emission glyph-independent \
-  --joint-spatial-confidence 0.358 \
-  --joint-spatial-min-nine-margin 0.400 \
   --raw-output rds30_raw.csv \
   --joint-spatial-diagnostics-dir rds30_diagnostics
 ```
