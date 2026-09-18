@@ -514,6 +514,104 @@ def make_fixed_profile(
             )
         )
 
+    # RDS-200 decimal dots are part of the same physical LCD geometry as
+    # the digits.  For a tight manually selected grid, derive their final
+    # position from the final digit boxes instead of preserving the legacy
+    # absolute profile coordinates.
+    #
+    # Horizontally the dot is centred on the boundary between neighbouring
+    # digits and is allowed to straddle that boundary.  Vertically its lower
+    # edge follows the transformed bottom segment d.
+    if (
+        profile.name == "rds200"
+        and profile.digit_segment_polygons is not None
+        and new_decimal_candidates
+    ):
+        bottom_edges = []
+
+        for digit_box, polygons in zip(
+            new_digit_boxes,
+            profile.digit_segment_polygons,
+        ):
+            if "d" not in polygons:
+                continue
+
+            _bx1, by1, _bx2, by2 = digit_box
+            box_height = max(1, by2 - by1)
+            local_bottom = float(
+                np.max(np.asarray(polygons["d"])[:, 1])
+            )
+            bottom_edges.append(
+                by1 + local_bottom * box_height / 130.0
+            )
+
+        if bottom_edges:
+            target_y2 = int(
+                round(float(np.median(bottom_edges)))
+            )
+            target_y2 = max(
+                1,
+                min(profile.canonical_height, target_y2),
+            )
+
+            aligned_decimal_candidates = []
+            number_digits = len(new_digit_boxes)
+
+            for (
+                x1,
+                old_y1,
+                x2,
+                old_y2,
+                decimal_places,
+            ) in new_decimal_candidates:
+                width = max(1, x2 - x1)
+                height = max(1, old_y2 - old_y1)
+
+                left_index = (
+                    number_digits
+                    - int(decimal_places)
+                    - 1
+                )
+                right_index = left_index + 1
+
+                if (
+                    0 <= left_index < number_digits
+                    and 0 <= right_index < number_digits
+                ):
+                    boundary_x = 0.5 * (
+                        new_digit_boxes[left_index][2]
+                        + new_digit_boxes[right_index][0]
+                    )
+                    new_x1 = int(
+                        round(boundary_x - 0.5 * width)
+                    )
+                    new_x2 = new_x1 + width
+                else:
+                    new_x1 = x1
+                    new_x2 = x2
+
+                new_x1 = max(0, new_x1)
+                new_x2 = min(
+                    profile.canonical_width,
+                    new_x2,
+                )
+                new_y2 = target_y2
+                new_y1 = max(0, new_y2 - height)
+
+                aligned_decimal_candidates.append(
+                    (
+                        new_x1,
+                        new_y1,
+                        new_x2,
+                        new_y2,
+                        decimal_places,
+                    )
+                )
+
+            new_decimal_candidates = (
+                aligned_decimal_candidates
+            )
+
     return replace(
         profile,
         digit_boxes=new_digit_boxes,
