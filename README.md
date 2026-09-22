@@ -282,6 +282,27 @@ Typical outputs are:
 
 Debug geometry is required to correspond to the actual decoder geometry. It is not recomputed from a separate tracking pass.
 
+## Optional interval post-processing
+
+`dosimeter_postprocess.py` is an optional analysis step for interval CSV files that
+contain `start_s`, `end_s`, `value`, and `confidence`. It is intended for
+cases where otherwise usable OCR output contains a few implausible interval values
+that would distort the physical summary.
+
+It first applies the same summary-confidence concept as the main pipeline and then
+performs iterative, time-weighted sigma clipping:
+
+```bash
+python3 dosimeter_postprocess.py intervals.csv \
+  --summary-min-confidence 0.20 \
+  --sigma-clip 3
+```
+
+Both the mean/variance calculation and the sigma-clipping statistics are weighted
+by interval duration. Sigma clipping assumes that the retained physical values are
+approximately stationary and unimodal; do not use it to erase real transients,
+ramps, or multimodal behaviour.
+
 ## Ground-truth evaluation
 
 If true displayed values are available, prepare them independently before inspecting OCR output when possible.
