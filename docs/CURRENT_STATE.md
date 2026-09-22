@@ -204,6 +204,18 @@ Do not continue tuning the RDS-200 production geometry or decoder against `IMG_0
 
 New algorithm changes should be motivated by genuinely new beta recordings or by a clearly isolated reproducible bug.
 
+## Optional post-processing of interval summaries
+
+`dosimeter_postprocess.py` can be applied after OCR when a small number of
+implausible interval values survive normal decoding. It reads interval/debug-index
+CSV files with `start_s`, `end_s`, `value`, and `confidence`, applies
+`--summary-min-confidence`, then iterative `--sigma-clip X` rejection.
+
+All statistics and clipping moments are time-weighted by interval duration. This is
+a downstream analysis tool only; it does not modify OCR, tracking, geometry, or the
+original CSV. Sigma clipping is appropriate only when an approximately stationary,
+unimodal physical distribution is a defensible model.
+
 ---
 
 # Historical development helpers
